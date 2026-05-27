@@ -1,17 +1,26 @@
+import { Search, Bell, Sun, Moon, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import { Search, Sun, Moon, Bell } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../hooks/useTheme";
-import { cn } from "../lib/utils";
 
 const PAGE_TITLES = {
-  home:         "Dashboard",
-  batches:      "Batches",
+  home: "Dashboard",
+  batches: "Batches",
   "blitz-race": "Blitz Race",
-  homework:     "Homework",
+  homework: "Homework",
   "pgn-center": "PGN Center",
-  academy:      "Academy",
-  admin:        "Admin Panel",
+  academy: "Academy",
+  admin: "Admin Panel",
+};
+
+const PAGE_DESCRIPTIONS = {
+  home: "Track your academy at a glance.",
+  batches: "Manage students, groups, and lessons.",
+  "blitz-race": "Run fast-paced chess sessions.",
+  homework: "Review homework and assignments.",
+  "pgn-center": "Store and explore game files.",
+  academy: "Coach tools and learning workspace.",
+  admin: "System settings and access control.",
 };
 
 export default function Header({ onProfile, searchValue, onSearch, currentPage }) {
@@ -19,67 +28,97 @@ export default function Header({ onProfile, searchValue, onSearch, currentPage }
   const [dark, toggleTheme] = useTheme();
   const [focused, setFocused] = useState(false);
 
-  const title = PAGE_TITLES[currentPage] || "Dashboard";
-
   return (
-    <header
-      className="flex items-center justify-between px-6 md:px-8 shrink-0 border-b border-black/[0.07] dark:border-white/[0.05] bg-white dark:bg-[#141920]"
-      style={{ height: 64 }}
-    >
-      {/* Left: page title */}
-      <div className="hidden md:flex items-center min-w-0">
-        <h1 className="text-[17px] font-bold text-slate-900 dark:text-white tracking-tight select-none">{title}</h1>
-      </div>
-
-      {/* Center: search */}
-      <div className={cn(
-        "flex items-center gap-2 rounded-xl px-3.5 py-2 transition-all duration-200 ml-8 md:ml-0 flex-1 max-w-sm border",
-        focused
-          ? "bg-white dark:bg-slate-800 border-[#f97316]/40 shadow-[0_0_0_3px_rgba(249,115,22,0.12)]"
-          : "bg-slate-50 dark:bg-slate-800/50 border-black/[0.08] dark:border-white/[0.07]"
-      )}>
-        <Search size={13} className="text-slate-400 shrink-0" />
-        <input
-          value={searchValue}
-          onChange={e => onSearch?.(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          placeholder="Search…"
-          className="bg-transparent text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 flex-1 outline-none min-w-0"
-        />
-        {searchValue && (
-          <button onClick={() => onSearch?.("")} className="text-slate-400 hover:text-slate-600 text-xs leading-none">✕</button>
-        )}
-      </div>
-
-      {/* Right: actions */}
-      <div className="flex items-center gap-1 ml-4">
-        <button
-          onClick={toggleTheme}
-          title={dark ? "Light mode" : "Dark mode"}
-          className="p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors"
-        >
-          {dark ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
-
-        <button className="p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors relative">
-          <Bell size={15} />
-          <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-[#f97316]" />
-        </button>
-
-        <button
-          onClick={onProfile}
-          title={user?.name}
-          className="ml-1.5 flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors"
-        >
-          <div className="w-7 h-7 rounded-full bg-[#f97316] text-white text-sm font-bold flex items-center justify-center shrink-0">
-            {user?.avatar || "?"}
+    <header className="shrink-0 border-b-2 border-[#1a140f] bg-[#fffaf2] px-4 py-4 md:px-6">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-[18px] border-2 border-[#1a140f] bg-[#f97316] text-xl text-white shadow-[0_6px_0_#1a140f]">
+            ♞
           </div>
-          <div className="hidden sm:block text-left">
-            <p className="text-[12.5px] font-semibold text-slate-800 dark:text-slate-200 leading-tight">{user?.name?.split(" ")[0]}</p>
-            <p className="text-[11px] text-slate-400 capitalize">{user?.role}</p>
+
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="truncate text-[22px] font-black tracking-tight text-[#1a140f] md:text-[26px]">
+                {PAGE_TITLES[currentPage] || "Dashboard"}
+              </h1>
+              <span className="rounded-full border-2 border-[#1a140f] bg-[#f7e3cf] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-[#6b3418]">
+                Chess Academy
+              </span>
+            </div>
+            <p className="mt-1 max-w-2xl text-[13px] font-medium text-[#6f5c49]">
+              {PAGE_DESCRIPTIONS[currentPage] || "Run your academy from one workspace."}
+            </p>
           </div>
-        </button>
+        </div>
+
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <div
+            className={`flex h-12 items-center gap-2 rounded-[18px] border-2 border-[#1a140f] px-4 shadow-[0_5px_0_#1a140f] transition-all ${
+              focused ? "bg-white" : "bg-[#fff4e7]"
+            }`}
+            style={{ minWidth: 0, width: "100%", maxWidth: 360 }}
+          >
+            <Search size={16} className="shrink-0 text-[#8c745c]" />
+            <input
+              value={searchValue}
+              onChange={(e) => onSearch?.(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder="Search students, batches, homework..."
+              className="min-w-0 flex-1 bg-transparent text-[14px] font-medium text-[#1a140f] placeholder:text-[#a79480]"
+            />
+            {searchValue ? (
+              <button
+                onClick={() => onSearch?.("")}
+                className="rounded-full border border-[#1a140f] bg-[#fff] px-2 py-1 text-[11px] font-black text-[#1a140f]"
+                type="button"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleTheme}
+              className="flex h-12 w-12 items-center justify-center rounded-[18px] border-2 border-[#1a140f] bg-[#fff4e7] text-[#1a140f] shadow-[0_5px_0_#1a140f] transition-transform hover:-translate-y-0.5"
+              type="button"
+              aria-label="Toggle theme"
+            >
+              {dark ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+
+            <button
+              className="relative flex h-12 w-12 items-center justify-center rounded-[18px] border-2 border-[#1a140f] bg-[#fff4e7] text-[#1a140f] shadow-[0_5px_0_#1a140f] transition-transform hover:-translate-y-0.5"
+              type="button"
+              aria-label="Notifications"
+            >
+              <Bell size={18} />
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-[#1a140f] bg-[#f97316] px-1 text-[10px] font-black text-white">
+                3
+              </span>
+            </button>
+
+            <button
+              onClick={onProfile}
+              className="flex h-12 items-center gap-3 rounded-[18px] border-2 border-[#1a140f] bg-[#1a140f] px-3 pr-4 text-left text-white shadow-[0_5px_0_#1a140f] transition-transform hover:-translate-y-0.5"
+              type="button"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white/80 bg-[#f97316] text-xs font-black text-white">
+                {user?.avatar || "?"}
+              </div>
+              <div className="hidden min-w-0 sm:block">
+                <p className="truncate text-[13px] font-bold leading-tight text-white">
+                  {user?.name || "Profile"}
+                </p>
+                <p className="truncate text-[11px] font-medium text-white/70 capitalize">
+                  {user?.role || "member"}
+                </p>
+              </div>
+              <ChevronRight size={16} className="hidden text-white/75 sm:block" />
+            </button>
+          </div>
+        </div>
       </div>
     </header>
   );

@@ -5,79 +5,105 @@
 @theme {
   --font-sans: "Inter", "SF Pro Display", system-ui, -apple-system, sans-serif;
 
-  /* Brand = orange (chessplay.io style) */
+  /* Warm chess-inspired palette */
   --color-brand-50:  #fff7ed;
   --color-brand-100: #ffedd5;
   --color-brand-200: #fed7aa;
   --color-brand-300: #fdba74;
   --color-brand-400: #fb923c;
   --color-brand-500: #f97316;
-  --color-brand-600: #ea6c0a;
-  --color-brand-700: #c2570a;
-  --color-brand-800: #9a3e08;
-  --color-brand-900: #7c3207;
-  --color-brand-950: #431507;
+  --color-brand-600: #ea580c;
+  --color-brand-700: #c2410c;
+  --color-brand-800: #9a3412;
+  --color-brand-900: #7c2d12;
+  --color-brand-950: #431407;
 
-  /* Error / destructive */
-  --color-terra-50:  #fdf5f3;
-  --color-terra-100: #fde8e2;
-  --color-terra-200: #fbc9bc;
-  --color-terra-300: #f5a088;
-  --color-terra-500: #c96050;
-  --color-terra-700: #964734;
-  --color-terra-900: #5c2918;
+  --color-terra-50:  #faf6f1;
+  --color-terra-100: #f3e8d9;
+  --color-terra-200: #e7c9ab;
+  --color-terra-300: #d69e6a;
+  --color-terra-500: #a9673b;
+  --color-terra-700: #6f3f24;
+  --color-terra-900: #3d2215;
 
-  --radius-card: 0.875rem;
-  --shadow-card:       0 1px 3px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04);
-  --shadow-card-hover: 0 4px 20px rgba(0,0,0,0.10), 0 2px 6px rgba(0,0,0,0.05);
-  --shadow-sidebar:    4px 0 24px rgba(0,0,0,0.15);
+  --shadow-card: 0 1px 0 rgba(0,0,0,0.08), 0 10px 28px rgba(0,0,0,0.08);
+  --shadow-card-hover: 0 2px 0 rgba(0,0,0,0.10), 0 16px 36px rgba(0,0,0,0.12);
 }
 
-/* ── Base ── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { scroll-behavior: smooth; }
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
+  margin: 0;
   font-family: var(--font-sans);
-  background: #F4F4F5;
-  color: #111827;
+  background:
+    linear-gradient(180deg, #f8f1e8 0%, #efe4d4 100%);
+  color: #19140f;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  font-size: 15px;
+  font-size: 14px;
 }
 
-/* ── Dark mode base ── */
-.dark body { background: #0f1117; color: #e8e8e8; }
-
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.22); }
-.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); }
-
-/* ── Skeleton ── */
-@keyframes skeleton-pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.45; }
+::selection {
+  background: rgba(249, 115, 22, 0.22);
+  color: #19140f;
 }
-.skeleton { animation: skeleton-pulse 1.6s ease-in-out infinite; }
 
-/* ── Page fade-in ── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(25, 20, 15, 0.18);
+  border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(25, 20, 15, 0.28);
+}
+
 @keyframes pageFadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.page-enter { animation: pageFadeIn 0.22s ease-out both; }
 
-/* ── Card hover ── */
-.card-hover { transition: box-shadow 0.18s ease, transform 0.18s ease; }
+.page-enter {
+  animation: pageFadeIn 0.22s ease-out both;
+}
+
+.card-hover {
+  transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+}
+
 .card-hover:hover {
   box-shadow: var(--shadow-card-hover);
   transform: translateY(-1px);
 }
 
-/* ── Input focus ── */
-input:focus, select:focus, textarea:focus {
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(249,115,22,0.15);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
 }

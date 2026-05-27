@@ -1,7 +1,8 @@
-﻿import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
-import { Play, Square, Trophy, Zap } from "lucide-react";
+import { Play, Square, Trophy, Zap, Sparkles } from "lucide-react";
+import { motion } from "framer-motion";
 import { cn } from "../lib/utils";
 
 function shuffle(arr) {
@@ -91,7 +92,7 @@ export default function BlitzRacePage() {
     setPuzzleStatus(newStatus);
     if (remainingRef.current.length === 0) {
       const unsolved = allPuzzlesRef.current.filter(p => newStatus[p.id] !== "correct");
-      if (unsolved.length === 0) { setRunning(false); clearInterval(timerInterval.current); setFeedback("All puzzles solved! 🎉"); pushLB(); return; }
+      if (unsolved.length === 0) { setRunning(false); clearInterval(timerInterval.current); setFeedback("All puzzles solved!"); pushLB(); return; }
       remainingRef.current = shuffle(unsolved);
     }
     applyPuzzle(remainingRef.current.shift());
@@ -142,114 +143,156 @@ export default function BlitzRacePage() {
   const feedbackType = feedback.includes("Correct") || feedback.includes("Good") ? "good" : feedback.includes("Wrong") ? "bad" : "neutral";
 
   return (
-    <div className="h-full flex overflow-hidden">
-      {/* Main */}
-      <div className="flex-1 flex flex-col p-8 md:p-10 overflow-y-auto border-r border-black/[0.05] dark:border-white/[0.05] min-w-0">
-        {/* Top bar */}
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
-          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2.5 tracking-tight">
-            <Zap size={20} className="text-brand-500" />Blitz Race
-          </h1>
-          {!running ? (
-            <div className="flex items-center gap-3 flex-wrap">
-              <select
-                value={selectedPgnId}
-                onChange={e => setSelectedPgnId(e.target.value)}
-                disabled={racerPgns.length === 0}
-                className="px-4 py-2.5 text-[14px] rounded-2xl border border-black/[0.08] dark:border-white/[0.08] bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 min-w-44"
-              >
-                {racerPgns.length === 0
-                  ? <option>No racer PGNs uploaded</option>
-                  : racerPgns.map(p => <option key={p.id} value={p.id}>{p.id} — {p.name}</option>)}
-              </select>
-              <button onClick={startRace} disabled={!selectedPgnId || racerPgns.length === 0}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[14px] font-semibold transition-colors shadow-sm">
-                <Play size={14} />Start
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-4">
-              <span className="font-bold text-lg text-slate-700 dark:text-slate-300 font-mono tabular-nums">⏱ {fmt(timer)}</span>
-              <span className="px-4 py-2 rounded-2xl bg-brand-600 text-white font-bold text-[14px]">Score: {score}</span>
-              <button onClick={stopRace} className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-terra-700 hover:bg-terra-900 text-white text-[14px] font-semibold transition-colors">
-                <Square size={14} />Stop
-              </button>
-            </div>
-          )}
-        </div>
+    <div className="min-h-screen bg-[#f6f8fc]">
+      <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
 
-        {racerPgns.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="max-w-sm text-center p-8 bg-white dark:bg-slate-900 rounded-2xl border border-black/[0.06] dark:border-white/[0.05] shadow-[var(--shadow-card)]">
-              <p className="text-[14px] text-slate-500 dark:text-slate-400">No racer PGNs found. Go to <strong>PGN Center</strong>, upload a PGN with type <strong>Racer</strong>.</p>
+        {/* Hero */}
+        <div className="relative overflow-hidden rounded-[36px] bg-gradient-to-br from-orange-500 via-brand-500 to-violet-600 p-8 md:p-10 shadow-[0_20px_80px_rgba(99,102,241,0.25)] mb-8">
+          <div className="absolute top-0 right-0 w-72 h-72 bg-white/10 rounded-full blur-3xl" />
+          <div className="absolute bottom-0 left-0 w-60 h-60 bg-black/10 rounded-full blur-3xl" />
+          <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+            <div>
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 border border-white/10 text-white text-sm font-medium mb-5">
+                <Sparkles size={15} />Blitz Race Mode
+              </div>
+              <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white leading-tight">Blitz Race</h1>
+              <p className="text-white/70 text-base mt-4 max-w-xl">
+                {running ? `Score: ${score} · ${fmt(timer)} elapsed` : "Solve puzzles as fast as you can to climb the leaderboard"}
+              </p>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap shrink-0">
+              {!running ? (
+                <>
+                  <select
+                    value={selectedPgnId}
+                    onChange={e => setSelectedPgnId(e.target.value)}
+                    disabled={racerPgns.length === 0}
+                    className="h-12 px-4 rounded-2xl border border-white/20 bg-white/10 text-white text-sm font-semibold backdrop-blur min-w-44 outline-none"
+                  >
+                    {racerPgns.length === 0
+                      ? <option>No racer PGNs uploaded</option>
+                      : racerPgns.map(p => <option key={p.id} value={p.id} className="text-gray-900">{p.id} — {p.name}</option>)}
+                  </select>
+                  <button onClick={startRace} disabled={!selectedPgnId || racerPgns.length === 0}
+                    className="h-12 px-7 rounded-2xl bg-white text-gray-900 font-bold text-sm shadow-2xl hover:scale-[1.02] transition-all flex items-center gap-2 disabled:opacity-50">
+                    <Play size={15} />Start Race
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="h-12 px-5 rounded-2xl bg-white/10 border border-white/20 text-white font-mono font-bold text-lg flex items-center gap-2">
+                    <span className="text-sm font-normal">⏱</span>{fmt(timer)}
+                  </div>
+                  <div className="h-12 px-5 rounded-2xl bg-white/20 border border-white/20 text-white font-bold text-sm flex items-center">
+                    Score: {score}
+                  </div>
+                  <button onClick={stopRace} className="h-12 px-6 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-bold text-sm flex items-center gap-2 transition-colors">
+                    <Square size={14} />Stop
+                  </button>
+                </>
+              )}
             </div>
           </div>
-        ) : (
-          <>
-            {selectedPgn && !running && (
-              <p className="text-[13px] text-slate-400 mb-5">📦 {poolCount} puzzles — "{selectedPgn.name}"</p>
-            )}
-            {/* Feedback */}
-            <div className={cn(
-              "px-5 py-4 rounded-2xl text-[14px] font-semibold mb-6 border transition-colors",
-              feedbackType === "good"   ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
-              : feedbackType === "bad" ? "bg-terra-50 dark:bg-terra-900/20 text-terra-700 dark:text-terra-400 border-terra-200 dark:border-terra-900"
-              : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-black/[0.06] dark:border-white/[0.06]"
-            )}>
-              {feedback || "Select a PGN and press Start."}
-            </div>
-            {/* Board */}
-            {fen && (
-              <div className="rounded-2xl overflow-hidden shadow-xl max-w-[480px]">
-                <Chessboard options={{
-                  position: fen, onPieceDrop: onDrop, arePiecesDraggable: running,
-                  darkSquareStyle: { backgroundColor: "#b45309" },
-                  lightSquareStyle: { backgroundColor: "#fde68a" },
-                }} />
-              </div>
-            )}
-            {/* Puzzle grid */}
-            {allPuzzles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-6 max-h-32 overflow-y-auto">
-                {allPuzzles.map((p, i) => {
-                  const st = puzzleStatus[p.id];
-                  const isCur = p.id === currentPuzzleId;
-                  return (
-                    <div key={p.id} title={p.name}
-                      className={cn(
-                        "w-9 h-9 rounded-xl text-xs font-bold flex items-center justify-center border-2 transition-colors",
-                        st === "correct" ? "bg-emerald-500 border-emerald-500 text-white"
-                        : st === "wrong" ? "bg-terra-700 border-terra-700 text-white"
-                        : isCur         ? "bg-brand-500 border-brand-500 text-white"
-                        : "bg-white dark:bg-slate-800 border-black/[0.08] dark:border-white/[0.08] text-slate-400"
-                      )}>{i + 1}</div>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Leaderboard */}
-      <div className="w-56 shrink-0 p-6 bg-white dark:bg-slate-900 border-l border-black/[0.05] dark:border-white/[0.05] overflow-y-auto">
-        <div className="flex items-center gap-2.5 mb-5">
-          <Trophy size={15} className="text-amber-500" />
-          <h2 className="font-bold text-[14px] text-slate-800 dark:text-slate-200">Leaderboard</h2>
         </div>
-        <div className="space-y-2">
-          {leaderboard.map((e, i) => (
-            <div key={i} className={cn(
-              "flex items-center gap-2.5 p-3 rounded-2xl text-[13px] border",
-              e.name === "You"
-                ? "bg-brand-50 dark:bg-brand-900/40 border-brand-200 dark:border-brand-800 font-bold"
-                : "bg-slate-50 dark:bg-slate-800/60 border-black/[0.06] dark:border-white/[0.04]"
-            )}>
-              <span className="w-5 text-slate-400 font-mono text-[12px]">{i + 1}</span>
-              <span className="flex-1 text-slate-700 dark:text-slate-200 truncate">{e.name}</span>
-              <span className="font-bold text-brand-600 dark:text-brand-400">{e.score}</span>
+
+        <div className="flex flex-col lg:flex-row gap-6 items-start">
+          {/* Main board area */}
+          <div className="flex-1 min-w-0 space-y-5">
+            {racerPgns.length === 0 ? (
+              <div className="rounded-[28px] bg-white border border-gray-200 py-20 flex flex-col items-center justify-center text-center shadow-sm">
+                <div className="w-16 h-16 rounded-[20px] bg-orange-500/10 flex items-center justify-center mb-4">
+                  <Zap size={26} className="text-orange-500" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-800 mb-2">No Racer PGNs Found</h3>
+                <p className="text-gray-400 text-sm max-w-xs">Go to PGN Center, upload a PGN and set its type to <strong>Racer</strong> to get started.</p>
+              </div>
+            ) : (
+              <>
+                {selectedPgn && !running && (
+                  <p className="text-[13px] text-gray-400 px-1">{poolCount} puzzles in "{selectedPgn.name}"</p>
+                )}
+
+                {/* Feedback bar */}
+                <motion.div
+                  key={feedback}
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={cn(
+                    "px-6 py-4 rounded-[20px] text-[14px] font-semibold border",
+                    feedbackType === "good"   ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : feedbackType === "bad"  ? "bg-red-50 text-red-700 border-red-200"
+                    : "bg-white text-gray-600 border-gray-200"
+                  )}
+                >
+                  {feedback || "Select a PGN and press Start."}
+                </motion.div>
+
+                {/* Chessboard */}
+                {fen && (
+                  <div className="rounded-[28px] overflow-hidden shadow-[0_15px_50px_rgba(0,0,0,0.10)] max-w-[500px]">
+                    <Chessboard options={{
+                      position: fen, onPieceDrop: onDrop, arePiecesDraggable: running,
+                      darkSquareStyle: { backgroundColor: "#6366f1" },
+                      lightSquareStyle: { backgroundColor: "#e0e7ff" },
+                    }} />
+                  </div>
+                )}
+
+                {/* Puzzle tracker */}
+                {allPuzzles.length > 0 && (
+                  <div className="bg-white rounded-[20px] border border-gray-200 p-5 shadow-sm">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400 mb-3">Puzzle Progress</p>
+                    <div className="flex flex-wrap gap-2">
+                      {allPuzzles.map((p, i) => {
+                        const st = puzzleStatus[p.id];
+                        const isCur = p.id === currentPuzzleId;
+                        return (
+                          <div key={p.id} title={p.name}
+                            className={cn(
+                              "w-9 h-9 rounded-xl text-xs font-bold flex items-center justify-center border-2 transition-colors",
+                              st === "correct" ? "bg-emerald-500 border-emerald-500 text-white"
+                              : st === "wrong" ? "bg-red-500 border-red-500 text-white"
+                              : isCur         ? "bg-brand-500 border-brand-500 text-white"
+                              : "bg-gray-50 border-gray-200 text-gray-400"
+                            )}>{i + 1}</div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Leaderboard */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full lg:w-64 shrink-0 bg-white rounded-[28px] border border-gray-200 shadow-sm overflow-hidden"
+          >
+            <div className="flex items-center gap-2.5 px-6 py-5 border-b border-gray-100">
+              <div className="w-8 h-8 rounded-xl bg-amber-50 flex items-center justify-center">
+                <Trophy size={15} className="text-amber-500" />
+              </div>
+              <h2 className="font-black text-[14px] text-gray-900">Leaderboard</h2>
             </div>
-          ))}
+            <div className="p-4 space-y-2">
+              {leaderboard.map((e, i) => (
+                <div key={i} className={cn(
+                  "flex items-center gap-3 p-3.5 rounded-2xl text-[13px] border",
+                  e.name === "You"
+                    ? "bg-brand-50 border-brand-200 font-bold"
+                    : "bg-gray-50 border-gray-100"
+                )}>
+                  <span className={cn("w-6 text-center font-mono text-[12px] font-bold",
+                    i === 0 ? "text-amber-500" : i === 1 ? "text-gray-400" : i === 2 ? "text-orange-700" : "text-gray-300"
+                  )}>{i + 1}</span>
+                  <span className="flex-1 text-gray-700 truncate">{e.name}</span>
+                  <span className={cn("font-bold", e.name === "You" ? "text-brand-600" : "text-gray-500")}>{e.score}</span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
         </div>
       </div>
     </div>

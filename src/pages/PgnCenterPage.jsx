@@ -1,6 +1,6 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { Upload, FileText, Zap, Trash2 } from "lucide-react";
+import { Upload, FileText, Zap, Trash2, Sparkles } from "lucide-react";
 import { Chess } from "chess.js";
 import { cn } from "../lib/utils";
 
@@ -31,12 +31,12 @@ function savePgns(v)    { localStorage.setItem("ca_pgns",    JSON.stringify(v));
 function savePuzzles(v) { localStorage.setItem("ca_puzzles", JSON.stringify(v)); }
 
 const TYPE_STYLES = {
-  racer:  "bg-terra-100  text-terra-700  dark:bg-terra-900/30  dark:text-terra-400",
-  puzzle: "bg-brand-100  text-brand-700  dark:bg-brand-900/40  dark:text-brand-400",
-  demo:   "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+  racer:  "bg-orange-50 text-orange-700",
+  puzzle: "bg-brand-50 text-brand-700",
+  demo:   "bg-emerald-50 text-emerald-700",
 };
 
-const inputCls = "w-full px-4 py-3 rounded-2xl border border-black/[0.08] dark:border-white/[0.08] bg-slate-50/80 dark:bg-slate-800/60 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 text-sm transition-colors";
+const inputCls = "w-full h-12 rounded-xl border border-gray-200 bg-white px-4 text-sm text-gray-800 placeholder:text-gray-400 outline-none transition-all focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500";
 
 export default function PgnCenterPage({ search }) {
   const [pgns, setPgns]               = useState(loadPgns);
@@ -75,104 +75,124 @@ export default function PgnCenterPage({ search }) {
   );
 
   return (
-    <div className="p-6 md:p-8 page-enter">
-      <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight mb-10">PGN Center</h1>
+    <div className="min-h-screen bg-[#f6f8fc]">
+      <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
 
-      <div className="flex flex-col lg:flex-row gap-7 items-start">
-        {/* Upload form */}
-        <div className="w-full lg:w-88 shrink-0" style={{ width: "clamp(300px, 30%, 360px)" }}>
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white dark:bg-slate-900 rounded-2xl p-8 border border-black/[0.06] dark:border-white/[0.05] shadow-[var(--shadow-card)] space-y-5"
-          >
-            <div className="flex items-center gap-2.5 mb-1">
-              <div className="w-9 h-9 rounded-xl bg-brand-50 dark:bg-brand-900/40 flex items-center justify-center">
-                <Upload size={15} className="text-brand-600 dark:text-brand-400" />
-              </div>
-              <h2 className="font-bold text-[15px] text-slate-800 dark:text-slate-200">Upload PGN</h2>
+        {/* Hero */}
+        <div className="relative overflow-hidden rounded-[36px] bg-gradient-to-br from-emerald-600 via-brand-500 to-violet-600 p-8 md:p-10 shadow-[0_20px_80px_rgba(99,102,241,0.25)] mb-8">
+          <div className="absolute top-0 right-0 w-72 h-72 bg-white/10 rounded-full blur-3xl" />
+          <div className="absolute bottom-0 left-0 w-60 h-60 bg-black/10 rounded-full blur-3xl" />
+          <div className="relative z-10">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 border border-white/10 text-white text-sm font-medium mb-5">
+              <Sparkles size={15} />PGN Library
             </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="flex flex-col gap-2">
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">PGN Name</label>
-                <input className={inputCls} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Kasparov vs Deep Blue" />
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Type</label>
-                <select className={inputCls} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
-                  <option value="racer">Racer</option>
-                  <option value="puzzle">Puzzle</option>
-                  <option value="demo">Demo</option>
-                </select>
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">PGN Content</label>
-                <textarea className={cn(inputCls, "resize-none font-mono text-xs")} rows={7} value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))} placeholder="Paste PGN here..." />
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Upload .pgn file</label>
-                <input type="file" accept=".pgn" onChange={handleFile} className="text-sm text-slate-500 file:mr-3 file:px-3 file:py-1.5 file:rounded-xl file:border-0 file:bg-slate-100 dark:file:bg-slate-800 file:text-slate-600 dark:file:text-slate-300 file:text-xs file:font-semibold cursor-pointer" />
-              </div>
-              <button type="submit" className="w-full py-3 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold transition-colors shadow-sm flex items-center justify-center gap-2 mt-2">
-                <Upload size={13} />Add PGN
-              </button>
-            </form>
-            {lastExtracted !== null && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.97 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-brand-50 dark:bg-brand-900/40 border border-brand-100 dark:border-brand-800 text-[13px] font-semibold text-brand-700 dark:text-brand-300"
-              >
-                <Zap size={13} className="text-brand-500" />
-                {lastExtracted} puzzle positions extracted
-              </motion.div>
-            )}
-          </motion.div>
+            <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white leading-tight">PGN Center</h1>
+            <p className="text-white/70 text-base mt-4 max-w-xl">{pgns.length} PGN{pgns.length !== 1 ? "s" : ""} uploaded · Upload games and extract puzzles</p>
+          </div>
         </div>
 
-        {/* PGN library */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="font-bold text-[15px] text-slate-700 dark:text-slate-200">PGN Library <span className="text-slate-400 font-normal">({filtered.length})</span></h2>
+        <div className="flex flex-col lg:flex-row gap-6 items-start">
+          {/* Upload form */}
+          <div className="w-full lg:w-80 shrink-0">
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-[28px] border border-gray-200 p-7 shadow-sm space-y-5"
+            >
+              <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
+                <div className="w-12 h-12 rounded-2xl bg-brand-500/10 flex items-center justify-center">
+                  <Upload size={18} className="text-brand-600" />
+                </div>
+                <div>
+                  <h2 className="font-black text-[15px] text-gray-900">Upload PGN</h2>
+                  <p className="text-xs text-gray-400 mt-0.5">Add games to your library</p>
+                </div>
+              </div>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400">PGN Name</label>
+                  <input className={inputCls} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Kasparov vs Deep Blue" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400">Type</label>
+                  <select className={inputCls} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+                    <option value="racer">Racer</option>
+                    <option value="puzzle">Puzzle</option>
+                    <option value="demo">Demo</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400">PGN Content</label>
+                  <textarea className={cn(inputCls, "h-auto py-3 resize-none font-mono text-xs")} rows={6} value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))} placeholder="Paste PGN here..." />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400">Upload .pgn file</label>
+                  <input type="file" accept=".pgn" onChange={handleFile} className="text-sm text-gray-500 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-600 file:text-xs file:font-semibold cursor-pointer" />
+                </div>
+                <button type="submit" className="w-full h-12 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2">
+                  <Upload size={14} />Add PGN
+                </button>
+              </form>
+              {lastExtracted !== null && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.97 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-emerald-50 border border-emerald-100 text-[13px] font-semibold text-emerald-700"
+                >
+                  <Zap size={13} className="text-emerald-500" />
+                  {lastExtracted} puzzle positions extracted
+                </motion.div>
+              )}
+            </motion.div>
           </div>
-          {filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 text-center bg-white dark:bg-slate-900 rounded-2xl border border-black/[0.06] dark:border-white/[0.05]">
-              <FileText size={28} className="text-slate-200 dark:text-slate-700 mb-3" />
-              <p className="font-semibold text-slate-400 text-[14px]">{search ? "No PGNs match your search" : "No PGNs uploaded yet"}</p>
+
+          {/* Library */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-black text-[15px] text-gray-900">PGN Library <span className="text-gray-400 font-normal text-sm">({filtered.length})</span></h2>
             </div>
-          ) : (
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-black/[0.06] dark:border-white/[0.05] shadow-[var(--shadow-card)] overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-[11px] font-bold text-slate-400 uppercase tracking-wider text-left" style={{ background: "rgba(0,0,0,0.02)" }}>
-                    <th className="px-7 py-4">ID</th>
-                    <th className="px-7 py-4">Name</th>
-                    <th className="px-7 py-4">Type</th>
-                    <th className="px-7 py-4">Puzzles</th>
-                    <th className="px-7 py-4 hidden sm:table-cell">Date</th>
-                    <th className="px-7 py-4" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-black/[0.03] dark:divide-white/[0.03]">
-                  {filtered.map((p, i) => (
-                    <motion.tr key={p.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
-                      className="hover:bg-black/[0.015] dark:hover:bg-white/[0.02] transition-colors group">
-                      <td className="px-7 py-4"><span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2.5 py-1 rounded-lg">{p.id}</span></td>
-                      <td className="px-7 py-4 font-semibold text-[14px] text-slate-700 dark:text-slate-200">{p.name}</td>
-                      <td className="px-7 py-4"><span className={cn("px-2.5 py-1 text-[11px] font-bold rounded-full", TYPE_STYLES[p.type])}>{p.type}</span></td>
-                      <td className="px-7 py-4"><span className="font-bold text-slate-700 dark:text-slate-300">{p.puzzleCount ?? "—"}</span></td>
-                      <td className="px-7 py-4 text-slate-400 text-[13px] hidden sm:table-cell">{p.date}</td>
-                      <td className="px-7 py-4 text-right">
-                        <button onClick={() => deletePgn(p.id)} className="opacity-0 group-hover:opacity-100 p-2 rounded-xl text-terra-500 hover:bg-terra-50 dark:hover:bg-terra-900/30 transition-all">
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </motion.tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+            {filtered.length === 0 ? (
+              <div className="rounded-[28px] bg-white border border-gray-200 py-20 flex flex-col items-center justify-center text-center">
+                <div className="w-16 h-16 rounded-[20px] bg-brand-500/10 flex items-center justify-center mb-4">
+                  <FileText size={26} className="text-brand-500" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-800">{search ? "No PGNs match your search" : "No PGNs Yet"}</h3>
+                <p className="text-gray-400 mt-2 text-sm">Upload your first PGN file to get started</p>
+              </div>
+            ) : (
+              <div className="bg-white rounded-[28px] border border-gray-200 shadow-sm overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50/60">
+                      <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wider">ID</th>
+                      <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wider">Name</th>
+                      <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wider">Type</th>
+                      <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wider">Puzzles</th>
+                      <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wider hidden sm:table-cell">Date</th>
+                      <th className="px-6 py-4" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filtered.map((p, i) => (
+                      <motion.tr key={p.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
+                        className="hover:bg-gray-50 transition-colors group">
+                        <td className="px-6 py-4"><span className="font-mono text-xs bg-gray-100 text-gray-500 px-2.5 py-1 rounded-lg">{p.id}</span></td>
+                        <td className="px-6 py-4 font-semibold text-[13.5px] text-gray-800">{p.name}</td>
+                        <td className="px-6 py-4"><span className={cn("px-2.5 py-1 text-[11px] font-bold rounded-full", TYPE_STYLES[p.type] || "bg-gray-100 text-gray-600")}>{p.type}</span></td>
+                        <td className="px-6 py-4 font-bold text-gray-700">{p.puzzleCount ?? "—"}</td>
+                        <td className="px-6 py-4 text-gray-400 text-[13px] hidden sm:table-cell">{p.date}</td>
+                        <td className="px-6 py-4 text-right">
+                          <button onClick={() => deletePgn(p.id)} className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all ml-auto">
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
