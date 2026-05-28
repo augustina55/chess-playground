@@ -1,36 +1,7 @@
 import { motion } from "framer-motion";
-import { Users, FileText, BookOpen, Zap, ArrowRight, ArrowUpRight, Trophy, Target, TrendingUp, Crown } from "lucide-react";
+import { Users, FileText, BookOpen, Zap, ArrowRight, ArrowUpRight, Trophy, Target, TrendingUp } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
-}
-
-function ChessBoardBg() {
-  return (
-    <svg className="absolute inset-0 w-full h-full opacity-[0.07]" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <pattern id="chess" x="0" y="0" width="48" height="48" patternUnits="userSpaceOnUse">
-          <rect x="0" y="0" width="24" height="24" fill="white" />
-          <rect x="24" y="24" width="24" height="24" fill="white" />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#chess)" />
-    </svg>
-  );
-}
-
-function KnightSVG() {
-  return (
-    <svg viewBox="0 0 100 120" className="w-full h-full" fill="currentColor">
-      <path d="M30 110 L70 110 L72 95 L60 90 C62 82 70 75 75 65 C82 52 80 35 70 25 C62 17 50 14 40 18 C35 20 28 26 26 32 C24 38 28 44 32 44 C28 46 24 50 24 55 C24 60 28 65 34 66 L30 75 L28 95 Z" opacity="0.9"/>
-      <circle cx="55" cy="28" r="6" opacity="0.7"/>
-    </svg>
-  );
-}
 
 function StatCard({ icon: Icon, label, value, sub, color, delay = 0 }) {
   const colors = {
@@ -110,63 +81,9 @@ export default function HomePage({ onNav, search }) {
     Open:         "bg-violet-50 text-violet-700",
   };
 
-  const firstName = user?.name?.split(" ")[0] || "Coach";
-
   return (
     <div className="min-h-screen bg-[#f4f6fb]">
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10 space-y-6">
-
-        {/* ── Hero ── */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-          className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-[#1e1b4b] via-[#312e81] to-[#4338ca] shadow-2xl"
-          style={{ minHeight: 220 }}
-        >
-          <ChessBoardBg />
-
-          {/* Glow blobs */}
-          <div className="absolute top-[-60px] right-[-60px] w-72 h-72 rounded-full bg-indigo-400/20 blur-3xl" />
-          <div className="absolute bottom-[-40px] left-[20%] w-56 h-56 rounded-full bg-violet-500/15 blur-3xl" />
-
-          {/* Chess knight decoration */}
-          <div className="absolute right-8 bottom-0 w-40 h-48 text-white/10 pointer-events-none hidden md:block">
-            <KnightSVG />
-          </div>
-
-          <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 p-8 md:p-10 lg:p-12">
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Crown size={14} className="text-amber-400" />
-                <span className="text-amber-400 text-xs font-bold uppercase tracking-widest">Chess Academy</span>
-              </div>
-              <h1 className="text-3xl md:text-4xl lg:text-5xl font-black text-white tracking-tight leading-tight">
-                {greeting()},<br />
-                <span className="text-indigo-300">{firstName}</span>
-              </h1>
-              <p className="text-indigo-200/70 text-sm mt-3 max-w-md leading-relaxed">
-                {batches.length > 0
-                  ? `You have ${batches.length} active batch${batches.length > 1 ? "es" : ""} and ${homework.length} homework assignment${homework.length !== 1 ? "s" : ""}.`
-                  : "Start by creating your first batch and assigning homework to students."}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-3 shrink-0">
-              <button
-                onClick={() => onNav("batches")}
-                className="h-11 px-6 rounded-2xl bg-white text-gray-900 font-bold text-sm shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all flex items-center gap-2"
-              >
-                <Users size={15} /> Manage Batches
-              </button>
-              <button
-                onClick={() => onNav("blitz-race")}
-                className="h-11 px-6 rounded-2xl bg-amber-400 text-amber-950 font-bold text-sm shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all flex items-center gap-2"
-              >
-                <Zap size={15} /> Blitz Race
-              </button>
-            </div>
-          </div>
-        </motion.div>
 
         {/* ── Stat cards ── */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
