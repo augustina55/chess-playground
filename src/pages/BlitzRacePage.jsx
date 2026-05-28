@@ -264,7 +264,7 @@ export default function BlitzRacePage() {
                 ) : (
                   <div className="overflow-hidden">
                     <Chessboard options={{
-                      position: "start",
+                      position: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                       arePiecesDraggable: false,
                       darkSquareStyle:  { backgroundColor: boardTheme.dark },
                       lightSquareStyle: { backgroundColor: boardTheme.light },
