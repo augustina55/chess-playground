@@ -262,23 +262,25 @@ export default function BlitzRacePage() {
                 </motion.div>
               </AnimatePresence>
 
-              {/* Board */}
-              {fen ? (
-                <div className="overflow-hidden shadow-[0_8px_40px_rgba(0,0,0,0.12)]">
-                  <Chessboard options={{
-                    position: fen,
-                    onPieceDrop: onDrop,
-                    arePiecesDraggable: running,
-                    darkSquareStyle:  { backgroundColor: boardTheme.dark },
-                    lightSquareStyle: { backgroundColor: boardTheme.light },
-                    boardStyle: { borderRadius: 0 },
-                  }} />
-                </div>
-              ) : (
-                <div className="aspect-square max-w-[500px] rounded-[4px] border-2 border-dashed border-gray-200 flex items-center justify-center">
-                  <p className="text-[13px] text-gray-400">Board will appear here</p>
-                </div>
-              )}
+              {/* Board — capped so it never exceeds viewport height */}
+              <div style={{ width: "min(100%, calc(100vh - 260px))", maxWidth: 540 }}>
+                {fen ? (
+                  <div className="overflow-hidden shadow-[0_8px_40px_rgba(0,0,0,0.12)]">
+                    <Chessboard options={{
+                      position: fen,
+                      onPieceDrop: onDrop,
+                      arePiecesDraggable: running,
+                      darkSquareStyle:  { backgroundColor: boardTheme.dark },
+                      lightSquareStyle: { backgroundColor: boardTheme.light },
+                      boardStyle: { borderRadius: 0 },
+                    }} />
+                  </div>
+                ) : (
+                  <div className="aspect-square border-2 border-dashed border-gray-200 rounded-sm flex items-center justify-center">
+                    <p className="text-[13px] text-gray-400">Board will appear here</p>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Right — stats + leaderboard */}
