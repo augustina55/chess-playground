@@ -12,6 +12,9 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem("caUser") || "null"); } catch { return null; }
   });
+  const [realUser, setRealUser] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem("caRealUser") || "null"); } catch { return null; }
+  });
 
   function login(username, password) {
     const stored = (() => {
@@ -30,7 +33,9 @@ export function AuthProvider({ children }) {
 
   function logout() {
     setUser(null);
+    setRealUser(null);
     localStorage.removeItem("caUser");
+    sessionStorage.removeItem("caRealUser");
   }
 
   function updateUser(patch) {
@@ -41,8 +46,25 @@ export function AuthProvider({ children }) {
     });
   }
 
+  function switchToRole(role) {
+    const target = DEMO_USERS.find(u => u.role === role);
+    if (!target) return;
+    const base = realUser || user;
+    sessionStorage.setItem("caRealUser", JSON.stringify(base));
+    setRealUser(base);
+    const { password: _, ...safe } = target;
+    setUser(safe);
+  }
+
+  function revertRole() {
+    if (!realUser) return;
+    setUser(realUser);
+    setRealUser(null);
+    sessionStorage.removeItem("caRealUser");
+  }
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, realUser, login, logout, updateUser, switchToRole, revertRole }}>
       {children}
     </AuthContext.Provider>
   );

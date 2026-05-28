@@ -1,4 +1,4 @@
-import { Search, Bell, Sun, Moon, ChevronRight } from "lucide-react";
+import { Search, Bell, Sun, Moon, ChevronRight, Eye, X } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../hooks/useTheme";
@@ -23,14 +23,38 @@ const PAGE_DESCRIPTIONS = {
   admin: "System settings and access control.",
 };
 
+const ROLE_COLORS = {
+  admin:   "bg-red-500",
+  coach:   "bg-indigo-500",
+  student: "bg-emerald-500",
+};
+
 export default function Header({ onProfile, searchValue, onSearch, currentPage }) {
-  const { user } = useAuth();
+  const { user, realUser, revertRole } = useAuth();
   const [dark, toggleTheme] = useTheme();
   const [focused, setFocused] = useState(false);
 
   return (
-    <header className="shrink-0 border-b-2 border-[#1a140f] bg-[#fffaf2] px-4 py-4 md:px-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+    <header className="shrink-0 border-b-2 border-[#1a140f] bg-[#fffaf2]">
+      {realUser && (
+        <div className="flex items-center justify-between gap-3 border-b-2 border-[#1a140f] bg-[#1a140f] px-4 py-2 md:px-6">
+          <div className="flex items-center gap-2 text-[13px] font-semibold text-white/90">
+            <Eye size={14} className="shrink-0" />
+            <span>Previewing as</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-black uppercase tracking-wide text-white ${ROLE_COLORS[user?.role] || "bg-gray-500"}`}>
+              {user?.role}
+            </span>
+            <span className="text-white/60">({user?.name})</span>
+          </div>
+          <button
+            onClick={revertRole}
+            className="flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-white/20 transition-colors"
+          >
+            <X size={12} />Exit Preview
+          </button>
+        </div>
+      )}
+      <div className="flex flex-col gap-4 px-4 py-4 md:px-6 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-[18px] border-2 border-[#1a140f] bg-[#f97316] text-xl text-white shadow-[0_6px_0_#1a140f]">
             ♞

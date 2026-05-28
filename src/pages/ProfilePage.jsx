@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, LogOut, Check, ExternalLink, Unlink } from "lucide-react";
+import { X, LogOut, Check, ExternalLink, Unlink, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { startLichessOAuth } from "../utils/lichess";
 import { cn } from "../lib/utils";
@@ -25,8 +25,14 @@ const ROLE_GRADIENTS = {
   student: "from-emerald-400 to-emerald-700",
 };
 
+const ROLE_OPTIONS = [
+  { role: "admin",   label: "Admin",   desc: "Full access, system settings", color: "bg-red-50 text-red-700 border-red-200",   active: "bg-red-600 text-white border-red-600"   },
+  { role: "coach",   label: "Coach",   desc: "Batches, homework, PGN tools",  color: "bg-indigo-50 text-indigo-700 border-indigo-200", active: "bg-indigo-600 text-white border-indigo-600" },
+  { role: "student", label: "Student", desc: "Assignments and progress",      color: "bg-emerald-50 text-emerald-700 border-emerald-200", active: "bg-emerald-600 text-white border-emerald-600" },
+];
+
 export default function ProfilePage({ onBack }) {
-  const { user, logout, updateUser } = useAuth();
+  const { user, realUser, logout, updateUser, switchToRole, revertRole } = useAuth();
   const [showLogout, setShowLogout]  = useState(false);
   const [ccStep,    setCcStep]       = useState("idle");
   const [ccUser,    setCcUser]       = useState("");
@@ -106,6 +112,51 @@ export default function ProfilePage({ onBack }) {
                 </div>
               ))}
             </div>
+
+            {/* Switch role (admin only) */}
+            {(realUser?.role === "admin" || user?.role === "admin") && (
+              <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">Preview As Role</p>
+                    {realUser && (
+                      <p className="text-[12px] text-amber-600 font-medium mt-0.5">Currently previewing — not your real session</p>
+                    )}
+                  </div>
+                  <Eye size={15} className="text-gray-300" />
+                </div>
+                <div className="p-4 space-y-2">
+                  {ROLE_OPTIONS.map(({ role, label, desc, color, active }) => {
+                    const isCurrent = user?.role === role;
+                    return (
+                      <button
+                        key={role}
+                        onClick={() => isCurrent ? null : switchToRole(role)}
+                        disabled={isCurrent}
+                        className={cn(
+                          "w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border text-left transition-all",
+                          isCurrent ? active + " cursor-default" : color + " hover:opacity-80"
+                        )}
+                      >
+                        <div>
+                          <p className="text-[13px] font-bold leading-tight">{label}</p>
+                          <p className={cn("text-[11px] mt-0.5", isCurrent ? "text-white/70" : "opacity-60")}>{desc}</p>
+                        </div>
+                        {isCurrent && <span className="text-[11px] font-black uppercase tracking-wide opacity-80">Active</span>}
+                      </button>
+                    );
+                  })}
+                  {realUser && (
+                    <button
+                      onClick={() => { revertRole(); onBack(); }}
+                      className="w-full mt-1 h-10 flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-gray-300 text-[13px] font-semibold text-gray-500 hover:border-gray-400 hover:text-gray-700 transition-colors"
+                    >
+                      <EyeOff size={14} />Exit Preview — return to Admin
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Connected accounts */}
             <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
