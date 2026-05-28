@@ -4,6 +4,8 @@ import { Chessboard } from "react-chessboard";
 import { Play, Square, Trophy, Zap, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "../lib/utils";
+import { useAuth } from "../context/AuthContext";
+import { BOARD_THEMES } from "../lib/boardThemes";
 
 function shuffle(arr) {
   const a = [...arr];
@@ -24,6 +26,9 @@ const MOCK_LB = [
 ];
 
 export default function BlitzRacePage() {
+  const { user }                           = useAuth();
+  const boardTheme = BOARD_THEMES.find(t => t.id === (user?.settings?.boardTheme ?? "brown")) || BOARD_THEMES[0];
+
   const [racerPgns, setRacerPgns]         = useState([]);
   const [selectedPgnId, setSelectedPgnId] = useState("");
   const [fen, setFen]                     = useState("");
@@ -229,12 +234,15 @@ export default function BlitzRacePage() {
 
                 {/* Chessboard */}
                 {fen && (
-                  <div className="rounded-[28px] overflow-hidden shadow-[0_15px_50px_rgba(0,0,0,0.10)] max-w-[500px]">
-                    <Chessboard options={{
-                      position: fen, onPieceDrop: onDrop, arePiecesDraggable: running,
-                      darkSquareStyle: { backgroundColor: "#6366f1" },
-                      lightSquareStyle: { backgroundColor: "#e0e7ff" },
-                    }} />
+                  <div className="overflow-hidden shadow-[0_15px_50px_rgba(0,0,0,0.10)] max-w-[500px]">
+                    <Chessboard
+                      position={fen}
+                      onPieceDrop={onDrop}
+                      arePiecesDraggable={running}
+                      customDarkSquareStyle={{ backgroundColor: boardTheme.dark }}
+                      customLightSquareStyle={{ backgroundColor: boardTheme.light }}
+                      customBoardStyle={{ borderRadius: 0 }}
+                    />
                   </div>
                 )}
 
