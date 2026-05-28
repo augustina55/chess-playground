@@ -230,19 +230,21 @@ export default function BlitzRacePage() {
 
             {/* Left — board */}
             <div className="flex-1 min-w-0 space-y-4">
-              {/* Feedback */}
+              {/* Feedback — only shown when there's a message */}
               <AnimatePresence mode="wait">
-                <motion.div key={feedback}
-                  initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                  transition={{ duration: 0.18 }}
-                  className={cn(
-                    "px-5 py-3.5 rounded-[18px] text-[14px] font-semibold border",
-                    feedbackType === "good" ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                    : feedbackType === "bad" ? "bg-red-50 text-red-700 border-red-200"
-                    : "bg-white text-gray-600 border-gray-200"
-                  )}>
-                  {feedback || "Select a PGN and press Start Race."}
-                </motion.div>
+                {feedback && (
+                  <motion.div key={feedback}
+                    initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                    transition={{ duration: 0.18 }}
+                    className={cn(
+                      "px-5 py-3.5 rounded-[18px] text-[14px] font-semibold border",
+                      feedbackType === "good" ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : feedbackType === "bad" ? "bg-red-50 text-red-700 border-red-200"
+                      : "bg-white text-gray-600 border-gray-200"
+                    )}>
+                    {feedback}
+                  </motion.div>
+                )}
               </AnimatePresence>
 
               {/* Board — capped so it never exceeds viewport height */}
