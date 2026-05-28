@@ -253,6 +253,7 @@ export default function BlitzRacePage() {
                   <div className="overflow-hidden shadow-[0_8px_40px_rgba(0,0,0,0.12)]">
                     <Chessboard options={{
                       position: fen,
+                      boardOrientation: fen.split(" ")[1] === "b" ? "black" : "white",
                       onPieceDrop: onDrop,
                       arePiecesDraggable: running,
                       darkSquareStyle:  { backgroundColor: boardTheme.dark },
