@@ -262,8 +262,14 @@ export default function BlitzRacePage() {
                     }} />
                   </div>
                 ) : (
-                  <div className="aspect-square border-2 border-dashed border-gray-200 rounded-sm flex items-center justify-center">
-                    <p className="text-[13px] text-gray-400">Board will appear here</p>
+                  <div className="overflow-hidden">
+                    <Chessboard options={{
+                      position: "start",
+                      arePiecesDraggable: false,
+                      darkSquareStyle:  { backgroundColor: boardTheme.dark },
+                      lightSquareStyle: { backgroundColor: boardTheme.light },
+                      boardStyle: { borderRadius: 0 },
+                    }} />
                   </div>
                 )}
               </div>
