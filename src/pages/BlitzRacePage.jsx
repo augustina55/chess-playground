@@ -195,44 +195,27 @@ export default function BlitzRacePage() {
     <div className="min-h-screen bg-[#f6f8fc]">
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
 
-        {/* Top bar */}
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-[28px] font-black tracking-tight text-gray-900">Blitz Race</h1>
-            <p className="text-[13px] text-gray-400 mt-0.5">
-              {running
-                ? `${poolCount} puzzle pool · solve as fast as you can`
-                : selectedPgn
-                  ? `${poolCount} puzzles in "${selectedPgn.name}"`
-                  : "Select a PGN to begin"}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3 flex-wrap">
-            {!running ? (
-              <>
-                {racerPgns.length > 0 && (
-                  <div className="relative">
-                    <select value={selectedPgnId} onChange={e => setSelectedPgnId(e.target.value)}
-                      className="h-11 pl-4 pr-10 rounded-2xl border border-gray-200 bg-white text-[13px] font-semibold text-gray-700 outline-none appearance-none focus:border-brand-500 min-w-44">
-                      {racerPgns.map(p => <option key={p.id} value={p.id}>{p.id} — {p.name}</option>)}
-                    </select>
-                    <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                  </div>
-                )}
-                <button onClick={startRace} disabled={!selectedPgnId || racerPgns.length === 0}
-                  className="flex items-center gap-2 h-11 px-6 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-bold shadow-lg shadow-brand-500/20 transition-all disabled:opacity-50">
-                  <Play size={15} />Start Race
-                </button>
-              </>
-            ) : (
-              <button onClick={stopRace}
-                className="flex items-center gap-2 h-11 px-6 rounded-2xl bg-red-500 hover:bg-red-600 text-white text-[13px] font-bold transition-colors">
-                <Square size={14} />Stop Race
-              </button>
+        {/* Setup bar — only shown before race starts */}
+        {!running && (
+          <div className="flex flex-wrap items-center gap-3 mb-6">
+            {racerPgns.length > 0 && (
+              <div className="relative">
+                <select value={selectedPgnId} onChange={e => setSelectedPgnId(e.target.value)}
+                  className="h-11 pl-4 pr-10 rounded-2xl border border-gray-200 bg-white text-[13px] font-semibold text-gray-700 outline-none appearance-none focus:border-brand-500 min-w-44">
+                  {racerPgns.map(p => <option key={p.id} value={p.id}>{p.id} — {p.name}</option>)}
+                </select>
+                <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              </div>
+            )}
+            <button onClick={startRace} disabled={!selectedPgnId || racerPgns.length === 0}
+              className="flex items-center gap-2 h-11 px-6 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-bold shadow-lg shadow-brand-500/20 transition-all disabled:opacity-50">
+              <Play size={15} />Start Race
+            </button>
+            {selectedPgn && (
+              <span className="text-[13px] text-gray-400">{poolCount} puzzles in "{selectedPgn.name}"</span>
             )}
           </div>
-        </div>
+        )}
 
         {racerPgns.length === 0 ? (
           <div className="rounded-[28px] bg-white border border-gray-200 py-24 flex flex-col items-center justify-center text-center shadow-sm">
@@ -286,8 +269,16 @@ export default function BlitzRacePage() {
             {/* Right — stats + leaderboard */}
             <div className="w-full lg:w-64 shrink-0 space-y-4">
 
-              {/* Circular timer */}
-              <RoundTimer timer={timer} running={running} fmt={fmt} />
+              {/* Circular timer + stop */}
+              <div className="space-y-3">
+                <RoundTimer timer={timer} running={running} fmt={fmt} />
+                {running && (
+                  <button onClick={stopRace}
+                    className="w-full flex items-center justify-center gap-2 h-10 rounded-2xl bg-red-500 hover:bg-red-600 text-white text-[13px] font-bold transition-colors">
+                    <Square size={13} />Stop Race
+                  </button>
+                )}
+              </div>
 
               {/* Correct / Wrong */}
               <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm p-4">
