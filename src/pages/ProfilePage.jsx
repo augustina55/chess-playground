@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, LogOut, Check, ExternalLink, Unlink, Eye, EyeOff,
-  Activity, Bell, Palette, ChevronDown,
+  Activity, Bell, Palette,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { startLichessOAuth } from "../utils/lichess";
@@ -311,15 +311,6 @@ function Toggle({ on, onToggle }) {
   );
 }
 
-function BoardPreview({ theme }) {
-  return (
-    <div className="flex rounded-lg overflow-hidden border-2 border-gray-200 shrink-0">
-      <div className="w-7 h-7" style={{ background: theme.light }} />
-      <div className="w-7 h-7" style={{ background: theme.dark }} />
-    </div>
-  );
-}
-
 function SettingsTab() {
   const { user, updateUser } = useAuth();
   const settings = user?.settings || {};
@@ -364,23 +355,6 @@ function SettingsTab() {
                 <div className="w-4 h-4 rounded-sm border border-gray-200 ml-1" style={{ background: currentTheme.dark }} />
                 <span className="text-[11px] text-gray-400">{currentTheme.dark}</span>
               </div>
-            </div>
-          </div>
-
-          {/* Dropdown selector */}
-          <div className="relative flex items-center gap-3">
-            <BoardPreview theme={currentTheme} />
-            <div className="relative flex-1">
-              <select
-                value={boardThemeId}
-                onChange={e => setSetting("boardTheme", e.target.value)}
-                className="w-full h-11 rounded-2xl border border-gray-200 bg-white pl-4 pr-10 text-[13px] font-semibold text-gray-700 outline-none appearance-none cursor-pointer focus:border-brand-500 transition-colors"
-              >
-                {BOARD_THEMES.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             </div>
           </div>
 

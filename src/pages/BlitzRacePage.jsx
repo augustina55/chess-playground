@@ -235,14 +235,14 @@ export default function BlitzRacePage() {
                 {/* Chessboard */}
                 {fen && (
                   <div className="overflow-hidden shadow-[0_15px_50px_rgba(0,0,0,0.10)] max-w-[500px]">
-                    <Chessboard
-                      position={fen}
-                      onPieceDrop={onDrop}
-                      arePiecesDraggable={running}
-                      customDarkSquareStyle={{ backgroundColor: boardTheme.dark }}
-                      customLightSquareStyle={{ backgroundColor: boardTheme.light }}
-                      customBoardStyle={{ borderRadius: 0 }}
-                    />
+                    <Chessboard options={{
+                      position: fen,
+                      onPieceDrop: onDrop,
+                      arePiecesDraggable: running,
+                      darkSquareStyle:  { backgroundColor: boardTheme.dark },
+                      lightSquareStyle: { backgroundColor: boardTheme.light },
+                      boardStyle: { borderRadius: 0 },
+                    }} />
                   </div>
                 )}
 
