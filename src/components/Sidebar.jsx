@@ -10,7 +10,6 @@ import {
   Settings,
   Menu,
   X,
-  LogOut,
   ChevronDown,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -65,7 +64,7 @@ function NavItem({ item, active, onClick }) {
   );
 }
 
-function SidebarContent({ active, user, logout, onNav, onItemClick }) {
+function SidebarContent({ active, user, onNav, onItemClick }) {
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 border-b-2 border-white/10 px-5 py-5">
@@ -133,23 +132,12 @@ function SidebarContent({ active, user, logout, onNav, onItemClick }) {
         </div>
       </nav>
 
-      <div className="shrink-0 border-t-2 border-white/10 px-4 py-4">
-        <button
-          onClick={logout}
-          type="button"
-          className="flex w-full items-center gap-3 rounded-[16px] border-2 border-[#1a140f] bg-[#fff4e7] px-3 py-3 text-left text-[13px] font-black text-[#1a140f] shadow-[0_5px_0_#1a140f] transition-transform hover:-translate-y-0.5"
-          title="Sign out"
-        >
-          <LogOut size={16} className="shrink-0" />
-          <span className="truncate">Sign out</span>
-        </button>
-      </div>
     </div>
   );
 }
 
 export default function Sidebar({ active, onNav }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -158,7 +146,6 @@ export default function Sidebar({ active, onNav }) {
         <SidebarContent
           active={active}
           user={user}
-          logout={logout}
           onNav={onNav}
         />
       </aside>
@@ -200,7 +187,6 @@ export default function Sidebar({ active, onNav }) {
               <SidebarContent
                 active={active}
                 user={user}
-                logout={logout}
                 onNav={onNav}
                 onItemClick={() => setMobileOpen(false)}
               />

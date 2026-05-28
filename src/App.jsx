@@ -18,7 +18,6 @@ function MainApp() {
   const { user, updateUser } = useAuth();
   const [page, setPage] = useState("home");
   const [showProfile, setShowProfile] = useState(false);
-  const [search, setSearch] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -38,33 +37,28 @@ function MainApp() {
   if (!user) return <LoginPage />;
 
   return (
-    <div className="min-h-screen overflow-hidden bg-[#f8f1e8]" style={{ background: "linear-gradient(180deg, #f3e8d9 0%, #f8f1e8 100%)" }}>
-      <div className="flex min-h-screen w-full overflow-hidden border-2 border-[#1a140f] bg-[#fff8ef] shadow-[0_18px_0_#1a140f,0_26px_48px_rgba(25,20,15,0.16)]">
+    <div className="h-screen overflow-hidden bg-[#f8f1e8]" style={{ background: "linear-gradient(180deg, #f3e8d9 0%, #f8f1e8 100%)" }}>
+      <div className="flex h-screen w-full overflow-hidden border-2 border-[#1a140f] bg-[#fff8ef] shadow-[0_18px_0_#1a140f,0_26px_48px_rgba(25,20,15,0.16)]">
         <Sidebar
           active={page}
-          onNav={(nextPage) => {
-            setPage(nextPage);
-            setSearch("");
-          }}
+          onNav={setPage}
         />
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <Header
             onProfile={() => setShowProfile(true)}
-            searchValue={search}
-            onSearch={setSearch}
             currentPage={page}
           />
 
           <main className="flex-1 overflow-y-auto">
             <div className="page-enter">
-              {page === "home" && <HomePage onNav={setPage} search={search} />}
-              {page === "batches" && <BatchesPage search={search} />}
+              {page === "home"       && <HomePage onNav={setPage} />}
+              {page === "batches"    && <BatchesPage />}
               {page === "blitz-race" && <BlitzRacePage />}
-              {page === "homework" && <HomeworkPage search={search} />}
-              {page === "pgn-center" && <PgnCenterPage search={search} />}
-              {page === "academy" && (user?.role === "admin" || user?.role === "coach") && <AcademyPage search={search} />}
-              {page === "admin" && user?.role === "admin" && <AdminPage search={search} />}
+              {page === "homework"   && <HomeworkPage />}
+              {page === "pgn-center" && <PgnCenterPage />}
+              {page === "academy"    && (user?.role === "admin" || user?.role === "coach") && <AcademyPage />}
+              {page === "admin"      && user?.role === "admin" && <AdminPage />}
             </div>
           </main>
         </div>
