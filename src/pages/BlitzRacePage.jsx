@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { Play, Square, Trophy } from "lucide-react";
@@ -45,7 +45,8 @@ function parsePgn(pgnText) {
   return puzzles;
 }
 
-const SOURCE_PUZZLES = parsePgn(racerPgnText);
+let SOURCE_PUZZLES = [];
+try { SOURCE_PUZZLES = parsePgn(racerPgnText); } catch (e) { console.error("PGN parse error:", e); }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
