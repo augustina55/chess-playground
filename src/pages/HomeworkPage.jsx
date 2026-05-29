@@ -66,6 +66,15 @@ function parsePgnContent(pgnId, content) {
   return puzzles;
 }
 
+// ── trim solution so it always ends on the player's move ─────────────────────
+// Player moves are at even indices (0,2,4…). If solution ends on an odd index
+// (opponent's move), drop it — the puzzle is solved when the player's last
+// move is made; the opponent's response doesn't need to be played.
+
+function trimSolution(sol) {
+  return sol.length % 2 === 0 ? sol.slice(0, -1) : [...sol];
+}
+
 // ── board helpers ─────────────────────────────────────────────────────────────
 
 function computeSquareStyles(square, currentFen) {
@@ -108,9 +117,12 @@ function HWPlayer({ hw, onBack }) {
   const boardTheme = BOARD_THEMES.find(t => t.id === (user?.settings?.boardTheme ?? "brown")) || BOARD_THEMES[0];
   const puzzles    = loadHwPuzzles(hw.pgnId);
 
+  const firstFen = puzzles[0]?.fen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
   const [idx,          setIdx]          = useState(0);
-  const [fen,          setFen]          = useState(puzzles[0]?.fen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-  const [solution,     setSolution]     = useState(puzzles[0]?.solution || []);
+  const [fen,          setFen]          = useState(firstFen);
+  const [boardFlip,    setBoardFlip]    = useState(firstFen.split(" ")[1] === "b" ? "black" : "white");
+  const [solution,     setSolution]     = useState(puzzles[0]?.solution ? trimSolution(puzzles[0].solution) : []);
   const [solutionStep, setSolutionStep] = useState(0);
   const [feedback,     setFeedback]     = useState(puzzles.length ? "Find the best move!" : "No puzzles in this PGN.");
   const [selectedSq,   setSelectedSq]   = useState(null);
@@ -129,7 +141,8 @@ function HWPlayer({ hw, onBack }) {
     if (!pzl) return;
     setIdx(i);
     setFen(pzl.fen);
-    setSolution(pzl.solution);
+    setBoardFlip(pzl.fen.split(" ")[1] === "b" ? "black" : "white");
+    setSolution(trimSolution(pzl.solution));
     setSolutionStep(0);
     setFeedback("Find the best move!");
     setSelectedSq(null);
@@ -284,7 +297,7 @@ function HWPlayer({ hw, onBack }) {
               <div className="overflow-hidden shadow-[0_6px_30px_rgba(0,0,0,0.10)]">
                 <Chessboard options={{
                   position: fen,
-                  boardOrientation: fen.split(" ")[1] === "b" ? "black" : "white",
+                  boardOrientation: boardFlip,
                   onPieceDrop: onDrop,
                   onSquareClick: onSquareClick,
                   allowDragging: true,
