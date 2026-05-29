@@ -185,17 +185,23 @@ export default function BlitzRacePage() {
     const game  = new Chess(currentFen);
     const moves = game.moves({ square, verbose: true });
     const styles = {
-      [square]: { backgroundColor: "rgba(234,88,12,0.40)" },
+      [square]: { backgroundColor: "rgba(234, 88, 12, 0.50)" },
     };
     moves.forEach(m => {
-      styles[m.to] = game.get(m.to)
-        ? { backgroundColor: "rgba(234,88,12,0.22)" }           // capture highlight
-        : { background: "radial-gradient(circle, rgba(0,0,0,0.14) 32%, transparent 32%)" }; // dot
+      // Use backgroundColor only — avoids conflict with darkSquareStyle/lightSquareStyle
+      styles[m.to] = {
+        backgroundColor: game.get(m.to)
+          ? "rgba(234, 88, 12, 0.28)"   // capture destination
+          : "rgba(0, 0, 0, 0.13)",      // empty destination
+      };
     });
     return styles;
   }
 
   function clearSelection() { setSelectedSq(null); setSquareStyles({}); }
+
+  // Clear highlights whenever position changes (new puzzle / opponent move)
+  useEffect(() => { clearSelection(); }, [fen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── shared move handler ──────────────────────────────────────────────────────
   // Returns: "invalid" | "wrong" | "correct"
@@ -341,11 +347,21 @@ export default function BlitzRacePage() {
                   boardOrientation: fen ? (fen.split(" ")[1] === "b" ? "black" : "white") : "white",
                   onPieceDrop: onDrop,
                   onSquareClick: onSquareClick,
+                  onPieceDrag: ({ piece, square }) => {
+                    if (!running || !fen) return;
+                    const g = new Chess(fen);
+                    const p = g.get(square);
+                    if (p && p.color === g.turn()) {
+                      setSelectedSq(square);
+                      setSquareStyles(computeSquareStyles(square, fen));
+                    }
+                  },
                   allowDragging: running,
                   canDragPiece: ({ piece }) => {
                     if (!running || !fen) return false;
                     return piece[0] === new Chess(fen).turn();
                   },
+                  dragActivationDistance: 3,
                   squareStyles: squareStyles,
                   darkSquareStyle:  { backgroundColor: boardTheme.dark },
                   lightSquareStyle: { backgroundColor: boardTheme.light },
