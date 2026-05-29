@@ -61,9 +61,6 @@ export default function Header({ onProfile, currentPage }) {
               <h1 className="truncate text-[22px] font-black tracking-tight text-[#1a140f] md:text-[26px]">
                 {PAGE_TITLES[currentPage] || "Dashboard"}
               </h1>
-              <span className="rounded-full border-2 border-[#1a140f] bg-[#f7e3cf] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-[#6b3418]">
-                Chess Academy
-              </span>
             </div>
             <p className="mt-1 max-w-2xl text-[13px] font-medium text-[#6f5c49]">
               {PAGE_DESCRIPTIONS[currentPage] || "Run your academy from one workspace."}
