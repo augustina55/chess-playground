@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronLeft, Trash2, Building2, Users, Settings, Plus, Sparkles, Shield } from "lucide-react";
+import { ChevronLeft, Trash2, Building2, Users, Settings, Plus, Search, X } from "lucide-react";
 import { cn } from "../lib/utils";
 
 const ROLES = ["admin", "coach", "student"];
@@ -103,7 +103,9 @@ export default function AdminPage({ search }) {
   ]);
   const [academies, saveAcademies] = useSaved("ca_academies", []);
   const [userForm,  setUserForm]   = useState({ username: "", name: "", role: "student", password: "" });
-  const [acForm,    setAcForm]     = useState({ name: "", phone: "", location: "", mainCoach: "" });
+  const [acForm,      setAcForm]      = useState({ name: "", phone: "", location: "", mainCoach: "", mainCoachId: null });
+  const [coachSearch, setCoachSearch] = useState("");
+  const [coachOpen,   setCoachOpen]   = useState(false);
   const [tab,       setTab]        = useState("users");
   const [selected,  setSelected]   = useState(null);
 
@@ -125,7 +127,8 @@ export default function AdminPage({ search }) {
     e.preventDefault();
     if (!acForm.name.trim()) return;
     saveAcademies([...academies, { id: Date.now(), ...acForm }]);
-    setAcForm({ name: "", phone: "", location: "", mainCoach: "" });
+    setAcForm({ name: "", phone: "", location: "", mainCoach: "", mainCoachId: null });
+    setCoachSearch(""); setCoachOpen(false);
   }
 
   return (
@@ -242,7 +245,55 @@ export default function AdminPage({ search }) {
                 <Field label="Academy Name"><input className={inputCls} value={acForm.name} onChange={e => setAcForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Knight's Chess Club" /></Field>
                 <Field label="Phone"><input className={inputCls} value={acForm.phone} onChange={e => setAcForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91 99999 00000" /></Field>
                 <Field label="Location"><input className={inputCls} value={acForm.location} onChange={e => setAcForm(f => ({ ...f, location: e.target.value }))} placeholder="City, State" /></Field>
-                <Field label="Main Coach"><input className={inputCls} value={acForm.mainCoach} onChange={e => setAcForm(f => ({ ...f, mainCoach: e.target.value }))} placeholder="Coach name" /></Field>
+                <Field label="Main Coach">
+                  {acForm.mainCoachId ? (
+                    <div className="flex items-center gap-3 h-12 px-4 rounded-xl border border-brand-300 bg-brand-50">
+                      <div className="w-7 h-7 rounded-full bg-brand-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                        {acForm.mainCoach[0]}
+                      </div>
+                      <span className="flex-1 text-[13px] font-semibold text-brand-700 truncate">{acForm.mainCoach}</span>
+                      <button type="button" onClick={() => { setAcForm(f => ({ ...f, mainCoach: "", mainCoachId: null })); setCoachSearch(""); }}
+                        className="text-brand-400 hover:text-brand-700 transition-colors">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <input className={cn(inputCls, "pl-10")} value={coachSearch}
+                        onChange={e => { setCoachSearch(e.target.value); setCoachOpen(true); }}
+                        onFocus={() => setCoachOpen(true)}
+                        onBlur={() => setTimeout(() => setCoachOpen(false), 150)}
+                        placeholder="Search by name or username…" />
+                      {coachOpen && (
+                        <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden">
+                          {(() => {
+                            const coaches = users.filter(u => u.role === "coach" &&
+                              (!coachSearch || u.name.toLowerCase().includes(coachSearch.toLowerCase()) ||
+                               u.username.toLowerCase().includes(coachSearch.toLowerCase()) ||
+                               String(u.id).includes(coachSearch))
+                            );
+                            return coaches.length === 0 ? (
+                              <p className="px-4 py-3 text-[13px] text-gray-400">No coaches found</p>
+                            ) : coaches.slice(0, 6).map(c => (
+                              <button key={c.id} type="button"
+                                onMouseDown={() => { setAcForm(f => ({ ...f, mainCoach: c.name, mainCoachId: c.id })); setCoachSearch(""); setCoachOpen(false); }}
+                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-0">
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-700 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                                  {c.avatar || c.name[0]}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-[13px] font-bold text-gray-800 truncate">{c.name}</p>
+                                  <p className="text-[11px] text-gray-400">@{c.username} · ID {c.id}</p>
+                                </div>
+                              </button>
+                            ));
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Field>
                 <button type="submit" className="w-full h-12 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold transition-colors shadow-lg shadow-brand-500/20">Add Academy</button>
               </form>
             </motion.div>

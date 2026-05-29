@@ -64,7 +64,20 @@ function NavItem({ item, active, onClick }) {
   );
 }
 
+function getAcademyName(user) {
+  if (!user || user.role === "admin") return "Chess Academy";
+  try {
+    const academies = JSON.parse(localStorage.getItem("ca_academies") || "[]");
+    if (user.role === "coach")
+      return academies.find(a => String(a.mainCoachId) === String(user.id))?.name || "Chess Academy";
+    if (user.role === "student")
+      return academies.find(a => String(a.id) === String(user.academyId))?.name || "Chess Academy";
+  } catch {}
+  return "Chess Academy";
+}
+
 function SidebarContent({ active, user, onNav, onItemClick }) {
+  const academyName = getAcademyName(user);
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 border-b-2 border-white/10 px-5 py-5">
@@ -73,7 +86,7 @@ function SidebarContent({ active, user, onNav, onItemClick }) {
             ♞
           </div>
           <div className="min-w-0">
-            <p className="text-[16px] font-black tracking-tight text-white">Chess Academy</p>
+            <p className="text-[16px] font-black tracking-tight text-white">{academyName}</p>
             <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#c7ad90]">
               Coach workspace
             </p>
