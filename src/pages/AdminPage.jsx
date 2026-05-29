@@ -193,6 +193,7 @@ export default function AdminPage({ search }) {
                       <tr className="border-b border-gray-100 bg-gray-50/60">
                         <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wider">Name</th>
                         <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wider">Username</th>
+                        <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wider hidden sm:table-cell">User ID</th>
                         <th className="px-6 py-4 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wider">Role</th>
                         <th className="px-6 py-4" />
                       </tr>
@@ -208,6 +209,7 @@ export default function AdminPage({ search }) {
                             </div>
                           </td>
                           <td className="px-6 py-4 font-mono text-[13px] text-gray-500">{u.username}</td>
+                          <td className="px-6 py-4 font-mono text-[12px] text-gray-400 hidden sm:table-cell">{u.id}</td>
                           <td className="px-6 py-4">
                             <span className={cn("px-2.5 py-1 text-[11px] font-bold rounded-full", ROLE_STYLES[u.role] || "bg-gray-100 text-gray-600")}>{u.role}</span>
                           </td>
