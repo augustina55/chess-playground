@@ -341,7 +341,11 @@ export default function BlitzRacePage() {
                   boardOrientation: fen ? (fen.split(" ")[1] === "b" ? "black" : "white") : "white",
                   onPieceDrop: onDrop,
                   onSquareClick: onSquareClick,
-                  arePiecesDraggable: running,
+                  allowDragging: running,
+                  canDragPiece: ({ piece }) => {
+                    if (!running || !fen) return false;
+                    return piece[0] === new Chess(fen).turn();
+                  },
                   squareStyles: squareStyles,
                   darkSquareStyle:  { backgroundColor: boardTheme.dark },
                   lightSquareStyle: { backgroundColor: boardTheme.light },
