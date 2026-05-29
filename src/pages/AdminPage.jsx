@@ -132,19 +132,6 @@ export default function AdminPage({ search }) {
     <div className="min-h-screen bg-[#f6f8fc]">
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
 
-        {/* Hero */}
-        <div className="relative overflow-hidden rounded-[36px] bg-gradient-to-br from-red-600 via-brand-600 to-violet-600 p-8 md:p-10 shadow-[0_20px_80px_rgba(99,102,241,0.25)] mb-8">
-          <div className="absolute top-0 right-0 w-72 h-72 bg-white/10 rounded-full blur-3xl" />
-          <div className="absolute bottom-0 left-0 w-60 h-60 bg-black/10 rounded-full blur-3xl" />
-          <div className="relative z-10">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 border border-white/10 text-white text-sm font-medium mb-5">
-              <Shield size={15} />Administration
-            </div>
-            <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white leading-tight">Admin Panel</h1>
-            <p className="text-white/70 text-base mt-4 max-w-xl">{users.length} users · {academies.length} academies</p>
-          </div>
-        </div>
-
         {/* Tabs */}
         <div className="flex gap-1 p-1.5 bg-white rounded-2xl border border-gray-200 shadow-sm w-fit mb-6">
           {TABS.map(t => {

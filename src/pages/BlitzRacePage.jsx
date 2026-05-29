@@ -301,19 +301,6 @@ export default function BlitzRacePage() {
     <div className="min-h-screen bg-[#f6f8fc]">
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
 
-        {/* Start bar — hidden during race */}
-        {!running && (
-          <div className="flex items-center gap-3 mb-6">
-            <button onClick={startRace}
-              className="flex items-center gap-2 h-11 px-6 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-bold shadow-lg shadow-brand-500/20 transition-all">
-              <Play size={15} />Start Race
-            </button>
-            <span className="text-[13px] text-gray-400">
-              {SOURCE_PUZZLES.length} puzzles · random order each race
-            </span>
-          </div>
-        )}
-
         <div className="flex flex-col lg:flex-row gap-6 items-start">
 
           {/* Left — board */}
@@ -360,6 +347,12 @@ export default function BlitzRacePage() {
           <div className="w-full lg:w-64 shrink-0 space-y-4">
 
             <div className="space-y-3">
+              {!running && (
+                <button onClick={startRace}
+                  className="w-full flex items-center justify-center gap-2 h-11 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-bold shadow-lg shadow-brand-500/20 transition-all">
+                  <Play size={15} />Start Race
+                </button>
+              )}
               <RoundTimer timer={timer} running={running} fmt={fmt} />
               {running && (
                 <button onClick={stopRace}

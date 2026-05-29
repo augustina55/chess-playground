@@ -259,39 +259,14 @@ export default function HomeworkPage({ search }) {
   return (
     <div className="min-h-screen bg-[#f6f8fc] dark:bg-[#020617]">
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
-        <div className="relative overflow-hidden rounded-[36px] bg-gradient-to-br from-brand-600 via-brand-500 to-violet-600 p-8 md:p-10 lg:p-12 shadow-[0_20px_80px_rgba(99,102,241,0.25)] mb-8">
-          <div className="absolute top-0 right-0 w-72 h-72 bg-white/10 rounded-full blur-3xl" />
-          <div className="absolute bottom-0 left-0 w-60 h-60 bg-black/10 rounded-full blur-3xl" />
-
-          <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
-            <div className="max-w-2xl">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white text-sm font-medium mb-5">
-                <Sparkles size={15} />
-                Smart Homework Management
-              </div>
-
-              <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white leading-tight">
-                Modern Homework
-                <br />
-                Dashboard
-              </h1>
-
-              <p className="text-white/75 text-base md:text-lg mt-5 max-w-xl leading-relaxed">
-                Organize chess assignments, manage PGNs, and track student progress with a clean modern interface.
-              </p>
-            </div>
-
-            {user?.role !== "student" && (
-              <button
-                onClick={() => setView("assign")}
-                className="h-16 px-7 rounded-2xl bg-white text-gray-900 font-bold text-sm shadow-2xl hover:scale-[1.02] transition-all flex items-center justify-center gap-3"
-              >
-                <Plus size={18} />
-                Create Homework
-              </button>
-            )}
+        {user?.role !== "student" && (
+          <div className="flex justify-end mb-6">
+            <button onClick={() => setView("assign")}
+              className="flex items-center gap-2 h-10 px-5 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-bold shadow-lg shadow-brand-500/20 transition-all">
+              <Plus size={15} />Create Homework
+            </button>
           </div>
-        </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
           <div className="rounded-[28px] bg-white dark:bg-slate-950 border border-gray-200 dark:border-white/[0.05] p-6 shadow-sm">
