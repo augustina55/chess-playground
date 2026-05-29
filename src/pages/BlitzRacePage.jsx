@@ -59,11 +59,6 @@ function shuffle(arr) {
   return a;
 }
 
-const MOCK_LB = [
-  { name: "Magnus",  score: 14, time: "1:32" },
-  { name: "Hikaru",  score: 12, time: "1:48" },
-  { name: "Fabiano", score: 10, time: "2:05" },
-];
 
 // ── Circular timer ────────────────────────────────────────────────────────────
 
@@ -111,7 +106,7 @@ export default function BlitzRacePage() {
   const [wrongCount,     setWrongCount]   = useState(0);
   const [timer,          setTimer]        = useState(0);
   const [running,        setRunning]      = useState(false);
-  const [leaderboard,    setLeaderboard]  = useState(MOCK_LB);
+  const [leaderboard,    setLeaderboard]  = useState([]);
   const [selectedSq,     setSelectedSq]   = useState(null);
   const [squareStyles,   setSquareStyles] = useState({});
 
@@ -349,7 +344,7 @@ export default function BlitzRacePage() {
                   allowDragging: running,
                   canDragPiece: ({ piece }) => {
                     if (!running || !fen) return false;
-                    return piece[0] === new Chess(fen).turn();
+                    return piece.pieceType[0] === new Chess(fen).turn();
                   },
                   dragActivationDistance: 3,
                   squareStyles: squareStyles,
