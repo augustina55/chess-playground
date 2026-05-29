@@ -185,14 +185,13 @@ export default function BlitzRacePage() {
     const game  = new Chess(currentFen);
     const moves = game.moves({ square, verbose: true });
     const styles = {
-      [square]: { backgroundColor: "rgba(234, 88, 12, 0.50)" },
+      [square]: { backgroundColor: "rgba(234, 88, 12, 0.70)" },
     };
     moves.forEach(m => {
-      // Use backgroundColor only — avoids conflict with darkSquareStyle/lightSquareStyle
       styles[m.to] = {
         backgroundColor: game.get(m.to)
-          ? "rgba(234, 88, 12, 0.28)"   // capture destination
-          : "rgba(0, 0, 0, 0.13)",      // empty destination
+          ? "rgba(234, 88, 12, 0.50)"   // capture destination
+          : "rgba(0, 0, 0, 0.22)",      // empty destination
       };
     });
     return styles;
@@ -347,15 +346,6 @@ export default function BlitzRacePage() {
                   boardOrientation: fen ? (fen.split(" ")[1] === "b" ? "black" : "white") : "white",
                   onPieceDrop: onDrop,
                   onSquareClick: onSquareClick,
-                  onPieceDrag: ({ piece, square }) => {
-                    if (!running || !fen) return;
-                    const g = new Chess(fen);
-                    const p = g.get(square);
-                    if (p && p.color === g.turn()) {
-                      setSelectedSq(square);
-                      setSquareStyles(computeSquareStyles(square, fen));
-                    }
-                  },
                   allowDragging: running,
                   canDragPiece: ({ piece }) => {
                     if (!running || !fen) return false;
