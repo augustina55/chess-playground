@@ -103,15 +103,17 @@ export default function BlitzRacePage() {
   const { user }   = useAuth();
   const boardTheme = BOARD_THEMES.find(t => t.id === (user?.settings?.boardTheme ?? "brown")) || BOARD_THEMES[0];
 
-  const [fen,          setFen]          = useState("");
-  const [solution,     setSolution]     = useState([]);
-  const [solutionStep, setSolutionStep] = useState(0);
-  const [feedback,     setFeedback]     = useState("");
-  const [score,        setScore]        = useState(0);
-  const [wrongCount,   setWrongCount]   = useState(0);
-  const [timer,        setTimer]        = useState(0);
-  const [running,      setRunning]      = useState(false);
-  const [leaderboard,  setLeaderboard]  = useState(MOCK_LB);
+  const [fen,            setFen]          = useState("");
+  const [solution,       setSolution]     = useState([]);
+  const [solutionStep,   setSolutionStep] = useState(0);
+  const [feedback,       setFeedback]     = useState("");
+  const [score,          setScore]        = useState(0);
+  const [wrongCount,     setWrongCount]   = useState(0);
+  const [timer,          setTimer]        = useState(0);
+  const [running,        setRunning]      = useState(false);
+  const [leaderboard,    setLeaderboard]  = useState(MOCK_LB);
+  const [selectedSq,     setSelectedSq]   = useState(null);
+  const [squareStyles,   setSquareStyles] = useState({});
 
   const timerInterval   = useRef(null);
   const remainingRef    = useRef([]);
@@ -177,23 +179,62 @@ export default function BlitzRacePage() {
     pushLB(); setFeedback(`Race stopped — Score: ${scoreRef.current}`);
   }
 
-  function onDrop({ sourceSquare, targetSquare }) {
-    if (!running || !fen || solution.length === 0) return false;
-    const uci      = sourceSquare + targetSquare;
+  // ── square highlighting ──────────────────────────────────────────────────────
+
+  function computeSquareStyles(square, currentFen) {
+    const game  = new Chess(currentFen);
+    const moves = game.moves({ square, verbose: true });
+    const styles = {
+      [square]: { backgroundColor: "rgba(234,88,12,0.40)" },
+    };
+    moves.forEach(m => {
+      styles[m.to] = game.get(m.to)
+        ? { backgroundColor: "rgba(234,88,12,0.22)" }           // capture highlight
+        : { background: "radial-gradient(circle, rgba(0,0,0,0.14) 32%, transparent 32%)" }; // dot
+    });
+    return styles;
+  }
+
+  function clearSelection() { setSelectedSq(null); setSquareStyles({}); }
+
+  // ── shared move handler ──────────────────────────────────────────────────────
+  // Returns: "invalid" | "wrong" | "correct"
+
+  function handleMove(from, to) {
+    if (!running || !fen || !solution.length) return "invalid";
+
+    // 1. Check chess legality first
+    const testGame = new Chess(fen);
+    let testMove;
+    try { testMove = testGame.move({ from, to, promotion: "q" }); } catch { testMove = null; }
+    if (!testMove) return "invalid";   // illegal chess move — snap back, do nothing
+
+    // 2. Check solution match
+    const uci      = from + to;
     const expected = solution[solutionStep].slice(0, 4);
+
     if (uci !== expected) {
+      // Valid chess move but wrong solution → count wrong + go to next puzzle
       const id = currentPuzzleRef.current?.id;
       if (id && puzzleStatusRef.current[id] !== "correct")
         puzzleStatusRef.current = { ...puzzleStatusRef.current, [id]: "wrong" };
       const nw = wrongRef.current + 1; wrongRef.current = nw; setWrongCount(nw);
-      setFeedback("Wrong! Try again."); return false;
+      setFeedback("Wrong! Moving to next puzzle...");
+      const sid = currentPuzzleRef.current?.id;
+      setTimeout(() => advanceNext(sid), 700);
+      return "wrong";
     }
+
+    // 3. Correct — apply with proper promotion char from solution
     const game = new Chess(fen);
     let move;
-    try { move = game.move({ from: sourceSquare, to: targetSquare, promotion: solution[solutionStep][4] || "q" }); }
-    catch { return false; }
-    if (!move) return false;
-    const newFen = game.fen(), nextStep = solutionStep + 1;
+    try { move = game.move({ from, to, promotion: solution[solutionStep][4] || "q" }); }
+    catch { return "invalid"; }
+    if (!move) return "invalid";
+
+    const newFen   = game.fen();
+    const nextStep = solutionStep + 1;
+
     if (nextStep >= solution.length) {
       setFen(newFen);
       const ns = scoreRef.current + 1; setScore(ns); scoreRef.current = ns;
@@ -202,15 +243,55 @@ export default function BlitzRacePage() {
           .sort((a, b) => b.score - a.score)
       );
       setFeedback("Correct! +1");
-      const sid = currentPuzzleRef.current?.id;
-      setTimeout(() => advanceNext(sid), 800); return true;
+      setTimeout(() => advanceNext(currentPuzzleRef.current?.id), 800);
+      return "correct";
     }
+
+    // Auto-play opponent's response
     const opp = solution[nextStep], g2 = new Chess(newFen);
     let oppOk = false;
-    try { oppOk = !!g2.move({ from: opp.slice(0, 2), to: opp.slice(2, 4), promotion: opp[4] || "q" }); } catch { /**/ }
+    try { oppOk = !!g2.move({ from: opp.slice(0, 2), to: opp.slice(2, 4), promotion: opp[4] || "q" }); } catch {}
     setFen(oppOk ? g2.fen() : newFen);
     setSolutionStep(oppOk ? nextStep + 1 : nextStep);
-    setFeedback("Good! Keep going..."); return true;
+    setFeedback("Good! Keep going...");
+    return "correct";
+  }
+
+  function onDrop({ sourceSquare, targetSquare }) {
+    clearSelection();
+    const result = handleMove(sourceSquare, targetSquare);
+    // return false = piece snaps back; return true = board accepts position
+    return result === "correct";
+  }
+
+  function onSquareClick({ piece, square }) {
+    if (!running) return;
+
+    if (selectedSq) {
+      if (selectedSq === square) { clearSelection(); return; }
+
+      const result = handleMove(selectedSq, square);
+      clearSelection();
+
+      if (result === "invalid") {
+        // Maybe the user wants to select a different own piece
+        const game = new Chess(fen);
+        const p    = game.get(square);
+        if (p && p.color === game.turn()) {
+          setSelectedSq(square);
+          setSquareStyles(computeSquareStyles(square, fen));
+        }
+      }
+      return;
+    }
+
+    // Select own piece
+    const game = new Chess(fen);
+    const p    = game.get(square);
+    if (p && p.color === game.turn()) {
+      setSelectedSq(square);
+      setSquareStyles(computeSquareStyles(square, fen));
+    }
   }
 
   const feedbackType = feedback.includes("Correct") || feedback.includes("Good") || feedback.includes("solved")
@@ -259,7 +340,9 @@ export default function BlitzRacePage() {
                   position: fen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                   boardOrientation: fen ? (fen.split(" ")[1] === "b" ? "black" : "white") : "white",
                   onPieceDrop: onDrop,
+                  onSquareClick: onSquareClick,
                   arePiecesDraggable: running,
+                  squareStyles: squareStyles,
                   darkSquareStyle:  { backgroundColor: boardTheme.dark },
                   lightSquareStyle: { backgroundColor: boardTheme.light },
                   boardStyle: { borderRadius: 0 },
