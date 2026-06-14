@@ -1,11 +1,17 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Users, Trash2, X, Link2, CalendarDays,
-  ChevronLeft, ChevronRight, Clock,
+  ChevronLeft, ChevronRight, Clock, Search,
+  UserPlus, UserMinus, Check,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/utils";
+import {
+  getBatches, getBatchesByAcademy, createBatch, deleteBatch,
+  getBatchStudents, addStudentToBatch, removeStudentFromBatch, getBatchStudentCounts,
+  getProfilesByAcademy, getProfiles, getAcademies, getBatchesForStudent,
+} from "../lib/db";
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
@@ -51,18 +57,6 @@ const inputCls =
   "w-full h-12 rounded-2xl border border-gray-200 bg-white px-4 text-[13px] text-gray-800 placeholder:text-gray-400 outline-none transition-all focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
-
-function useBatches() {
-  const [batches, setBatches] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("ca_batches") || "[]"); } catch { return []; }
-  });
-  function save(b) { setBatches(b); localStorage.setItem("ca_batches", JSON.stringify(b)); }
-  return [batches, save];
-}
-
-function genCode(n) {
-  return "B-" + String(n + 1).padStart(3, "0");
-}
 
 function fmtTime(t) {
   if (!t) return "";
@@ -281,14 +275,181 @@ function AddBatchDrawer({ open, onClose, onSave, defaultCoach }) {
   );
 }
 
+// ── StudentManagementDrawer ───────────────────────────────────────────────────
+
+function StudentManagementDrawer({ batch, open, onClose, academyStudents }) {
+  const [enrolled,  setEnrolled]  = useState([]);
+  const [loading,   setLoading]   = useState(false);
+  const [saving,    setSaving]    = useState(null); // studentId being saved
+  const [search,    setSearch]    = useState("");
+
+  useEffect(() => {
+    if (!batch || !open) return;
+    setLoading(true);
+    getBatchStudents(batch.id).then(s => { setEnrolled(s); setLoading(false); });
+  }, [batch?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const enrolledIds = useMemo(() => new Set(enrolled.map(s => s.id)), [enrolled]);
+
+  const available = useMemo(() =>
+    academyStudents.filter(s =>
+      s.role === "student" &&
+      !enrolledIds.has(s.id) &&
+      (!search ||
+        s.name?.toLowerCase().includes(search.toLowerCase()) ||
+        s.batchCode?.toLowerCase().includes(search.toLowerCase()))
+    ),
+    [academyStudents, enrolledIds, search]
+  );
+
+  async function handleAdd(student) {
+    setSaving(student.id);
+    try {
+      await addStudentToBatch(batch.id, student.id);
+      setEnrolled(prev => [...prev, student]);
+    } finally { setSaving(null); }
+  }
+
+  async function handleRemove(student) {
+    setSaving(student.id);
+    try {
+      await removeStudentFromBatch(batch.id, student.id);
+      setEnrolled(prev => prev.filter(s => s.id !== student.id));
+    } finally { setSaving(null); }
+  }
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex justify-end"
+        >
+          <motion.aside
+            initial={{ x: 520 }} animate={{ x: 0 }} exit={{ x: 520 }}
+            transition={{ type: "spring", stiffness: 300, damping: 34 }}
+            className="w-full max-w-[480px] bg-[#f6f8fc] h-full flex flex-col overflow-hidden shadow-2xl"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 bg-white border-b border-gray-200 shrink-0">
+              <div className="min-w-0">
+                <h2 className="font-black text-[16px] text-gray-900 truncate">{batch?.name}</h2>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className={cn("px-2 py-0.5 text-[10px] font-bold rounded-full border", LEVEL_CHIP[batch?.level] || LEVEL_CHIP.Open)}>
+                    {batch?.level}
+                  </span>
+                  <span className="text-[12px] text-gray-400">{enrolled.length} student{enrolled.length !== 1 ? "s" : ""}</span>
+                </div>
+              </div>
+              <button onClick={onClose} className="w-9 h-9 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex items-center justify-center transition-colors shrink-0 ml-3">
+                <X size={17} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+
+              {/* Enrolled students */}
+              <div className="px-6 py-5">
+                <p className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 mb-3">
+                  Enrolled ({enrolled.length})
+                </p>
+                {loading ? (
+                  <p className="text-[13px] text-gray-400 py-4 text-center">Loading…</p>
+                ) : enrolled.length === 0 ? (
+                  <div className="py-6 text-center rounded-2xl border border-dashed border-gray-200 bg-white">
+                    <Users size={24} className="text-gray-200 mx-auto mb-2" />
+                    <p className="text-[13px] text-gray-400">No students yet</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {enrolled.map(s => (
+                      <div key={s.id} className="flex items-center gap-3 px-4 py-3 bg-white rounded-2xl border border-gray-200">
+                        <div className="w-9 h-9 rounded-full bg-brand-600 text-white flex items-center justify-center text-[13px] font-black shrink-0">
+                          {s.avatar || s.name?.[0]?.toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-bold text-gray-800 truncate">{s.name}</p>
+                          {s.batchCode && (
+                            <p className="text-[11px] text-gray-400">{s.batchCode}</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleRemove(s)}
+                          disabled={saving === s.id}
+                          className="w-8 h-8 rounded-xl bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center transition-colors shrink-0 disabled:opacity-50">
+                          {saving === s.id ? <span className="text-[10px]">…</span> : <UserMinus size={14} />}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div className="mx-6 border-t border-gray-200" />
+
+              {/* Add students */}
+              <div className="px-6 py-5">
+                <p className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 mb-3">
+                  Add Students
+                </p>
+                <div className="relative mb-3">
+                  <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input
+                    className="w-full h-10 pl-10 pr-4 rounded-xl border border-gray-200 bg-white text-[13px] outline-none focus:border-brand-500"
+                    placeholder="Search by name or batch code…"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                  />
+                </div>
+                {available.length === 0 ? (
+                  <p className="text-[13px] text-gray-400 py-4 text-center">
+                    {search ? "No matches found" : "All academy students are enrolled"}
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {available.map(s => (
+                      <div key={s.id} className="flex items-center gap-3 px-4 py-3 bg-white rounded-2xl border border-gray-200">
+                        <div className="w-9 h-9 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-[13px] font-black shrink-0">
+                          {s.avatar || s.name?.[0]?.toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-bold text-gray-800 truncate">{s.name}</p>
+                          {s.batchCode && (
+                            <p className="text-[11px] text-gray-400">{s.batchCode}</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleAdd(s)}
+                          disabled={saving === s.id}
+                          className="flex items-center gap-1 h-8 px-3 rounded-xl bg-brand-50 text-brand-600 hover:bg-brand-100 text-[12px] font-bold transition-colors shrink-0 disabled:opacity-50">
+                          {saving === s.id ? "…" : <><UserPlus size={13} /><span>Add</span></>}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.aside>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 // ── BatchRow ──────────────────────────────────────────────────────────────────
 
-function BatchRow({ batch, onDelete }) {
+function BatchRow({ batch, studentCount, onDelete, onClick, canManage }) {
   const active = batch.isActive !== false;
   const sched  = scheduleSummary(batch);
 
   return (
-    <div className="group flex items-start gap-4 px-5 py-4 border-b border-gray-100 last:border-0 hover:bg-gray-50/60 transition-colors">
+    <div
+      onClick={onClick}
+      className="group flex items-start gap-4 px-5 py-4 border-b border-gray-100 last:border-0 hover:bg-gray-50/60 transition-colors cursor-pointer"
+    >
       {/* Left: code + name + level */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-0.5">
@@ -298,11 +459,10 @@ function BatchRow({ batch, onDelete }) {
           </span>
         </div>
         <p className="text-[14px] font-bold text-gray-900 truncate leading-snug">{batch.name}</p>
-        {/* Student count + schedule (secondary row) */}
         <div className="flex items-center gap-3 mt-1.5">
           <span className="flex items-center gap-1 text-[12px] text-gray-500">
             <Users size={12} className="shrink-0" />
-            {batch.students?.length || 0}
+            {studentCount}
           </span>
           {sched && (
             <span className="flex items-center gap-1 text-[12px] text-gray-500">
@@ -336,19 +496,27 @@ function BatchRow({ batch, onDelete }) {
         </span>
       </div>
 
-      {/* Delete */}
-      <button onClick={() => onDelete(batch.id)}
-        className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all shrink-0 mt-0.5">
-        <Trash2 size={13} />
-      </button>
+      {/* Manage + Delete — coach/admin only */}
+      {canManage && (
+        <div className="flex items-center gap-1 shrink-0 mt-0.5">
+          <span className="opacity-0 group-hover:opacity-100 text-[11px] font-bold text-brand-600 px-2 py-1 rounded-lg bg-brand-50 transition-all whitespace-nowrap">
+            Manage
+          </span>
+          <button onClick={e => { e.stopPropagation(); onDelete(batch.id); }}
+            className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all">
+            <Trash2 size={13} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 // ── MyBatchesTab ──────────────────────────────────────────────────────────────
 
-function MyBatchesTab({ batches, saveBatches, search, user }) {
-  const [showAdd, setShowAdd] = useState(false);
+function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, academyStudents }) {
+  const [showAdd, setShowAdd]   = useState(false);
+  const [selected, setSelected] = useState(null);
 
   const filtered = batches.filter(b =>
     !search ||
@@ -357,26 +525,23 @@ function MyBatchesTab({ batches, saveBatches, search, user }) {
     b.level?.toLowerCase().includes(search.toLowerCase())
   );
 
-  function handleSave(form) {
-    saveBatches([...batches, {
-      ...form,
-      id: genCode(batches.length),
-      students: [],
-      createdAt: new Date().toLocaleDateString(),
-    }]);
+  async function handleSave(form) {
+    await onAdd(form);
   }
 
   return (
     <>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-[20px] font-black text-gray-900">My Batches</h2>
+          <h2 className="text-[20px] font-black text-gray-900">Batches</h2>
           <p className="text-[12px] text-gray-400 mt-0.5">{batches.length} batch{batches.length !== 1 ? "es" : ""}</p>
         </div>
-        <button onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 h-10 px-5 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-semibold shadow-lg shadow-brand-500/20 transition-all">
-          <Plus size={15} />Add Batch
-        </button>
+        {(user?.role === "admin" || user?.role === "coach") && (
+          <button onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 h-10 px-5 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-semibold shadow-lg shadow-brand-500/20 transition-all">
+            <Plus size={15} />Add Batch
+          </button>
+        )}
       </div>
 
       {filtered.length === 0 ? (
@@ -397,15 +562,21 @@ function MyBatchesTab({ batches, saveBatches, search, user }) {
         </div>
       ) : (
         <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
-          {/* Table header */}
           <div className="flex items-center gap-4 px-5 py-3 border-b border-gray-100 bg-gray-50/80">
             <p className="flex-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Batch</p>
             <p className="hidden sm:block w-28 shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400">Coach</p>
             <p className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400">Status</p>
-            <span className="w-8 shrink-0" />
+            <span className="w-24 shrink-0" />
           </div>
           {filtered.map(b => (
-            <BatchRow key={b.id} batch={b} onDelete={id => saveBatches(batches.filter(x => x.id !== id))} />
+            <BatchRow
+              key={b.id}
+              batch={b}
+              studentCount={studentCounts[b.id] || 0}
+              onDelete={onDelete}
+              onClick={() => (user?.role === "admin" || user?.role === "coach") ? setSelected(b) : null}
+              canManage={user?.role === "admin" || user?.role === "coach"}
+            />
           ))}
         </div>
       )}
@@ -416,11 +587,18 @@ function MyBatchesTab({ batches, saveBatches, search, user }) {
         onSave={handleSave}
         defaultCoach={user?.name || ""}
       />
+
+      <StudentManagementDrawer
+        batch={selected}
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        academyStudents={academyStudents}
+      />
     </>
   );
 }
 
-// ── Calendar helpers ──────────────────────────────────────────────────────────
+// ── Calendar views ─────────────────────────────────────────────────────────────
 
 function BatchChip({ batch, date }) {
   const jsDay = date.getDay();
@@ -525,7 +703,7 @@ function WeekView({ cursor, batches }) {
   );
 }
 
-function DayView({ cursor, batches }) {
+function DayView({ cursor, batches, studentCounts }) {
   const jsDay = cursor.getDay();
   const dv    = DAYS.find(d => d.js === jsDay)?.value;
   const items = batchesForDate(batches, cursor).sort((a, b) => {
@@ -556,8 +734,7 @@ function DayView({ cursor, batches }) {
                   <p className="text-[12px] text-gray-400 mt-0.5">{b.coach || "—"} · {b.level}</p>
                 </div>
                 <span className="flex items-center gap-1.5 text-[13px] text-gray-500 shrink-0">
-                  <Users size={13} />
-                  {b.students?.length || 0}
+                  <Users size={13} />{studentCounts[b.id] || 0}
                 </span>
                 {b.meetingLink && (
                   <a href={b.meetingLink} target="_blank" rel="noreferrer"
@@ -574,9 +751,7 @@ function DayView({ cursor, batches }) {
   );
 }
 
-// ── CalendarTab ───────────────────────────────────────────────────────────────
-
-function CalendarTab({ batches }) {
+function CalendarTab({ batches, studentCounts }) {
   const [viewMode, setViewMode] = useState("month");
   const [cursor, setCursor]     = useState(new Date());
   const [coachFilter, setCoach] = useState("all");
@@ -610,9 +785,7 @@ function CalendarTab({ batches }) {
 
   return (
     <>
-      {/* Controls row */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        {/* Coach filter */}
         <div className="flex items-center gap-2">
           <span className="text-[12px] font-bold text-gray-500 whitespace-nowrap">Coach:</span>
           <select value={coachFilter} onChange={e => setCoach(e.target.value)}
@@ -621,8 +794,6 @@ function CalendarTab({ batches }) {
             {coaches.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-
-        {/* View mode toggle */}
         <div className="flex rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
           {["day","week","month"].map(v => (
             <button key={v} onClick={() => setViewMode(v)}
@@ -634,7 +805,6 @@ function CalendarTab({ batches }) {
         </div>
       </div>
 
-      {/* Navigation */}
       <div className="flex items-center gap-3 mb-4">
         <button onClick={() => navigate(-1)}
           className="w-9 h-9 rounded-xl border border-gray-200 bg-white flex items-center justify-center hover:bg-gray-50 transition-colors shadow-sm">
@@ -649,25 +819,146 @@ function CalendarTab({ batches }) {
 
       {viewMode === "month" && <MonthView cursor={cursor} batches={visible} />}
       {viewMode === "week"  && <WeekView  cursor={cursor} batches={visible} />}
-      {viewMode === "day"   && <DayView   cursor={cursor} batches={visible} />}
+      {viewMode === "day"   && <DayView   cursor={cursor} batches={visible} studentCounts={studentCounts} />}
     </>
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Student: read-only enrolled batches view ──────────────────────────────────
 
-export default function BatchesPage({ search }) {
-  const { user }             = useAuth();
-  const [batches, saveBatches] = useBatches();
-  const [tab, setTab]          = useState("batches");
+function StudentBatchesView({ search }) {
+  const { user }   = useAuth();
+  const [batches,  setBatches]  = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [tab,      setTab]      = useState("batches");
+
+  useEffect(() => {
+    getBatchesForStudent(user?.id).then(b => { setBatches(b); setLoading(false); });
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filtered = batches.filter(b =>
+    !search ||
+    b.name?.toLowerCase().includes(search.toLowerCase()) ||
+    b.level?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-32">
+      <span className="w-8 h-8 rounded-full border-2 border-gray-200 border-t-brand-500 animate-spin" />
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-[#f6f8fc]">
+      <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
+        <div className="flex items-center border-b-2 border-gray-200 mb-7 gap-0">
+          {[["batches","My Batches"],["calendar","Schedule"]].map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={cn("relative px-5 py-3 text-[14px] font-bold transition-colors",
+                tab === id ? "text-brand-600" : "text-gray-400 hover:text-gray-600")}>
+              {label}
+              {tab === id && (
+                <motion.span layoutId="student-batch-tab"
+                  className="absolute bottom-[-2px] left-0 right-0 h-0.5 bg-brand-600 rounded-full" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {tab === "batches" && (
+          <>
+            <div className="mb-6">
+              <h2 className="text-[20px] font-black text-gray-900">My Batches</h2>
+              <p className="text-[12px] text-gray-400 mt-0.5">Classes you're enrolled in</p>
+            </div>
+            {filtered.length === 0 ? (
+              <div className="rounded-[28px] bg-white border border-gray-200 py-20 flex flex-col items-center text-center">
+                <div className="w-16 h-16 rounded-[20px] bg-brand-50 flex items-center justify-center mb-4">
+                  <Users size={28} className="text-brand-400" />
+                </div>
+                <h3 className="text-[16px] font-bold text-gray-800">Not enrolled yet</h3>
+                <p className="text-[13px] text-gray-400 mt-1.5 max-w-xs">
+                  Your coach will add you to a batch. Check back soon!
+                </p>
+              </div>
+            ) : (
+              <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
+                {filtered.map(b => (
+                  <BatchRow
+                    key={b.id}
+                    batch={b}
+                    studentCount={0}
+                    onDelete={() => {}}
+                    onClick={() => {}}
+                    canManage={false}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+        {tab === "calendar" && (
+          <CalendarTab batches={batches} studentCounts={{}} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Coach/Admin batches view ──────────────────────────────────────────────────
+
+function CoachAdminBatchesView({ search }) {
+  const { user }         = useAuth();
+  const [batches,         setBatches]         = useState([]);
+  const [studentCounts,   setStudentCounts]   = useState({});
+  const [academyStudents, setAcademyStudents] = useState([]);
+  const [academyId,       setAcademyId]       = useState(null);
+  const [tab,             setTab]             = useState("batches");
+
+  useEffect(() => {
+    getAcademies().then(all => {
+      let ac = null;
+      if (user?.role === "coach")
+        ac = all.find(a => String(a.mainCoachId) === String(user?.id));
+      const id = ac?.id || null;
+      setAcademyId(id);
+
+      const batchLoader   = id ? getBatchesByAcademy(id) : getBatches();
+      const profileLoader = id ? getProfilesByAcademy(id) : getProfiles();
+
+      Promise.all([batchLoader, profileLoader, getBatchStudentCounts()])
+        .then(([b, profiles, counts]) => {
+          setBatches(b);
+          setAcademyStudents(profiles);
+          setStudentCounts(counts);
+        });
+    });
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleAddBatch(batch) {
+    const id = `B-${Date.now()}`;
+    const created = await createBatch({
+      ...batch,
+      id,
+      students: [],
+      academyId: academyId || null,
+      coachId:   user?.role === "coach" ? user?.id : null,
+    });
+    setBatches(prev => [...prev, created]);
+  }
+
+  async function handleDeleteBatch(id) {
+    await deleteBatch(id);
+    setBatches(prev => prev.filter(b => b.id !== id));
+    setStudentCounts(prev => { const c = { ...prev }; delete c[id]; return c; });
+  }
 
   return (
     <div className="min-h-screen bg-[#f6f8fc]">
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
 
-        {/* Tabs */}
         <div className="flex items-center border-b-2 border-gray-200 mb-7 gap-0">
-          {[["batches", "My Batches"], ["calendar", "Calendar"]].map(([id, label]) => (
+          {[["batches", "Batches"], ["calendar", "Calendar"]].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)}
               className={cn(
                 "relative px-5 py-3 text-[14px] font-bold transition-colors",
@@ -685,12 +976,28 @@ export default function BatchesPage({ search }) {
         </div>
 
         {tab === "batches" && (
-          <MyBatchesTab batches={batches} saveBatches={saveBatches} search={search} user={user} />
+          <MyBatchesTab
+            batches={batches}
+            studentCounts={studentCounts}
+            onAdd={handleAddBatch}
+            onDelete={handleDeleteBatch}
+            search={search}
+            user={user}
+            academyStudents={academyStudents}
+          />
         )}
         {tab === "calendar" && (
-          <CalendarTab batches={batches} />
+          <CalendarTab batches={batches} studentCounts={studentCounts} />
         )}
       </div>
     </div>
   );
+}
+
+// ── Main page entry ───────────────────────────────────────────────────────────
+
+export default function BatchesPage({ search }) {
+  const { user } = useAuth();
+  if (user?.role === "student") return <StudentBatchesView search={search} />;
+  return <CoachAdminBatchesView search={search} />;
 }

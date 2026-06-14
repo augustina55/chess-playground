@@ -1,21 +1,20 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import Cropper from "react-easy-crop";
 import {
   Plus, Users, Trash2, X, Search, Eye, EyeOff,
   GraduationCap, Star, Phone, Mail, Calendar,
   ChevronRight, Link2, UserCheck, BookOpen, BarChart2,
+  Upload, Check, AlertCircle, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { cn } from "../lib/utils";
-
-// ── storage hook ──────────────────────────────────────────────────────────────
-
-function useSaved(key, def) {
-  const [val, setVal] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(def)); } catch { return def; }
-  });
-  function save(v) { setVal(v); localStorage.setItem(key, JSON.stringify(v)); }
-  return [val, save];
-}
+import { useAuth } from "../context/AuthContext";
+import {
+  getCoaches, createCoach, deleteCoach,
+  getProfiles, getProfilesByAcademy, createProfile, deleteProfile,
+  getBatches, getBatchesForStudent,
+  getAcademies, updateAcademy,
+} from "../lib/db";
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -73,22 +72,308 @@ function Drawer({ open, onClose, title, width = "max-w-[480px]", children }) {
   );
 }
 
-// ── Academy tab (placeholder) ─────────────────────────────────────────────────
+// ── Logo cropper helpers ──────────────────────────────────────────────────────
+
+function loadImage(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = src;
+  });
+}
+
+async function cropToDataUrl(imageSrc, pixelCrop, outputSize = 400) {
+  const img = await loadImage(imageSrc);
+  const canvas = document.createElement("canvas");
+  canvas.width = outputSize;
+  canvas.height = outputSize;
+  const ctx = canvas.getContext("2d");
+  ctx.beginPath();
+  ctx.arc(outputSize / 2, outputSize / 2, outputSize / 2, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(
+    img,
+    pixelCrop.x, pixelCrop.y,
+    pixelCrop.width, pixelCrop.height,
+    0, 0, outputSize, outputSize
+  );
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
+// ── Crop modal ────────────────────────────────────────────────────────────────
+
+function CropperModal({ src, onDone, onCancel }) {
+  const [crop,   setCrop]   = useState({ x: 0, y: 0 });
+  const [zoom,   setZoom]   = useState(1);
+  const [pixels, setPixels] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const onCropComplete = useCallback((_, croppedPixels) => {
+    setPixels(croppedPixels);
+  }, []);
+
+  async function handleDone() {
+    if (!pixels) return;
+    setSaving(true);
+    const dataUrl = await cropToDataUrl(src, pixels);
+    onDone(dataUrl);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-black/80 backdrop-blur-sm">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 shrink-0">
+        <h3 className="text-white font-bold text-[15px]">Crop Logo</h3>
+        <button onClick={onCancel}
+          className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
+          <X size={16} />
+        </button>
+      </div>
+
+      {/* Cropper area */}
+      <div className="relative flex-1 mx-4 rounded-2xl overflow-hidden bg-black">
+        <Cropper
+          image={src}
+          crop={crop}
+          zoom={zoom}
+          aspect={1}
+          cropShape="round"
+          showGrid={false}
+          onCropChange={setCrop}
+          onZoomChange={setZoom}
+          onCropComplete={onCropComplete}
+        />
+      </div>
+
+      {/* Zoom slider */}
+      <div className="px-5 pt-5 pb-2 shrink-0">
+        <div className="flex items-center gap-3">
+          <ZoomOut size={15} className="text-white/60 shrink-0" />
+          <input
+            type="range"
+            min={1} max={3} step={0.01}
+            value={zoom}
+            onChange={e => setZoom(Number(e.target.value))}
+            className="flex-1 accent-[#f97316]"
+          />
+          <ZoomIn size={15} className="text-white/60 shrink-0" />
+        </div>
+        <p className="text-center text-[11px] text-white/40 mt-1.5">Drag to reposition · Scroll or slide to zoom</p>
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-3 px-5 pb-6 pt-3 shrink-0">
+        <button onClick={onCancel}
+          className="flex-1 h-12 rounded-2xl border border-white/20 text-white text-[14px] font-semibold hover:bg-white/10 transition-colors">
+          Cancel
+        </button>
+        <button onClick={handleDone} disabled={saving}
+          className="flex-1 h-12 rounded-2xl bg-[#f97316] hover:bg-[#ea6c0f] text-white text-[14px] font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
+          {saving
+            ? <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+            : <Check size={15} />
+          }
+          {saving ? "Cropping…" : "Crop & Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Academy tab ───────────────────────────────────────────────────────────────
+
+const MAX_LOGO_BYTES = 500 * 1024 // 500 KB
 
 function AcademyTab() {
-  return (
-    <div className="flex flex-col items-center justify-center py-24 text-center">
-      <div className="w-20 h-20 rounded-[24px] bg-brand-50 flex items-center justify-center mb-5">
-        <GraduationCap size={34} className="text-brand-400" />
-      </div>
-      <h3 className="text-[20px] font-black text-gray-800">Academy Details</h3>
-      <p className="text-[13px] text-gray-400 mt-2 max-w-xs">
-        Configure your academy profile, settings, and branding here.
-      </p>
-      <span className="mt-4 px-4 py-2 rounded-full bg-amber-50 border border-amber-200 text-[12px] font-bold text-amber-600">
-        Coming Soon
-      </span>
+  const { user } = useAuth();
+  const fileRef   = useRef();
+
+  const [academy,   setAcademy]   = useState(null);
+  const [name,      setName]      = useState("");
+  const [logo,      setLogo]      = useState(null);   // base64 data URL or null
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
+  const [saved,     setSaved]     = useState(false);
+  const [fileError, setFileError] = useState("");
+  const [cropSrc,   setCropSrc]   = useState(null);  // raw src before crop
+
+  useEffect(() => {
+    getAcademies().then(all => {
+      let ac = null;
+      if (user?.role === "coach")
+        ac = all.find(a => String(a.mainCoachId) === String(user.id));
+      else if (user?.role === "student")
+        ac = all.find(a => String(a.id) === String(user.academyId));
+      else
+        ac = all[0]; // admin: first academy
+      if (ac) {
+        setAcademy(ac);
+        setName(ac.name || "");
+        setLogo(ac.logo || null);
+        broadcastAcademy(ac.name, ac.logo);
+      }
+    }).finally(() => setLoading(false));
+  }, [user]);
+
+  function broadcastAcademy(name, logoDataUrl) {
+    if (name       !== undefined) localStorage.setItem("ca_academy_name",  name       || "");
+    if (logoDataUrl !== undefined) localStorage.setItem("ca_academy_logo", logoDataUrl || "");
+    window.dispatchEvent(new CustomEvent("ca-logo-update"));
+  }
+
+  function handleFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_LOGO_BYTES) {
+      setFileError(`File is ${(file.size / 1024).toFixed(0)} KB — max allowed is 500 KB.`);
+      return;
+    }
+    setFileError("");
+    const reader = new FileReader();
+    reader.onload = ev => setCropSrc(ev.target.result); // open cropper
+    reader.readAsDataURL(file);
+  }
+
+  async function handleSave() {
+    if (!academy) return;
+    setSaving(true); setSaved(false);
+    try {
+      const updated = await updateAcademy(academy.id, { name: name.trim(), logo });
+      setAcademy(updated);
+      broadcastAcademy(name.trim(), logo);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setFileError("Save failed: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function removeLogo() { setLogo(null); setCropSrc(null); setFileError(""); broadcastAcademy(undefined, null); }
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-24">
+      <span className="w-6 h-6 rounded-full border-2 border-gray-200 border-t-brand-500 animate-spin" />
     </div>
+  );
+
+  if (!academy) return (
+    <div className="flex flex-col items-center justify-center py-24 text-center">
+      <GraduationCap size={34} className="text-gray-300 mb-3" />
+      <p className="text-[14px] font-semibold text-gray-500">No academy found for your account.</p>
+      <p className="text-[12px] text-gray-400 mt-1">Ask an admin to create and link an academy.</p>
+    </div>
+  );
+
+  return (
+    <>
+    {cropSrc && (
+      <CropperModal
+        src={cropSrc}
+        onDone={dataUrl => { setLogo(dataUrl); setCropSrc(null); }}
+        onCancel={() => setCropSrc(null)}
+      />
+    )}
+    <div className="max-w-lg space-y-5">
+
+      {/* Logo upload card */}
+      <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-gray-400">Academy Logo</p>
+        </div>
+        <div className="px-6 py-5">
+          <div className="flex items-center gap-5">
+            {/* Logo preview / click target */}
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className={cn(
+                "w-24 h-24 rounded-full border-2 overflow-hidden flex items-center justify-center shrink-0 transition-all",
+                logo
+                  ? "border-brand-300 hover:opacity-80"
+                  : "border-dashed border-gray-300 bg-gray-50 hover:border-brand-400"
+              )}
+            >
+              {logo
+                ? <img src={logo} alt="Academy logo" className="w-full h-full object-cover" />
+                : <Upload size={22} className="text-gray-400" />
+              }
+            </button>
+
+            <div className="min-w-0">
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="h-9 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-semibold transition-colors"
+              >
+                {logo ? "Change Logo" : "Upload Logo"}
+              </button>
+              <p className="text-[11px] text-gray-400 mt-2">PNG, JPG, SVG · Max 500 KB</p>
+              {logo && (
+                <button
+                  type="button"
+                  onClick={removeLogo}
+                  className="text-[11px] text-red-500 hover:underline mt-1 block"
+                >
+                  Remove logo
+                </button>
+              )}
+            </div>
+          </div>
+
+          {fileError && (
+            <div className="mt-4 flex items-start gap-2 text-[12px] text-red-600 bg-red-50 border border-red-200 px-3.5 py-3 rounded-xl">
+              <AlertCircle size={13} className="shrink-0 mt-0.5" />
+              {fileError}
+            </div>
+          )}
+
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFile}
+          />
+        </div>
+      </div>
+
+      {/* Academy name */}
+      <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-gray-400">Academy Name</p>
+        </div>
+        <div className="px-6 py-5">
+          <input
+            className={inputCls}
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="e.g. Spark Chess Academy"
+          />
+        </div>
+      </div>
+
+      {/* Save */}
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={saving || !name.trim()}
+        className={cn(
+          "flex items-center gap-2 h-12 px-6 rounded-2xl font-semibold text-[14px] transition-all disabled:opacity-50",
+          saved
+            ? "bg-emerald-600 text-white"
+            : "bg-brand-600 hover:bg-brand-700 text-white shadow-lg shadow-brand-500/20"
+        )}
+      >
+        {saving && <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />}
+        {saved   && <Check size={15} />}
+        {saving ? "Saving…" : saved ? "Saved!" : "Save Changes"}
+      </button>
+    </div>
+    </>
   );
 }
 
@@ -105,10 +390,10 @@ function AddCoachDrawer({ open, onClose, onSave }) {
     }));
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
     if (!form.name.trim()) return;
-    onSave({ ...form, id: Date.now(), avatar: form.name.trim()[0].toUpperCase() });
+    await onSave(form);
     setForm(blank);
     onClose();
   }
@@ -117,19 +402,16 @@ function AddCoachDrawer({ open, onClose, onSave }) {
     <Drawer open={open} onClose={onClose} title="Add Coach">
       <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
-
           <Field label="Full Name">
             <input className={inputCls} value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
               placeholder="Coach full name" autoFocus required />
           </Field>
-
           <Field label="Rating">
             <input type="number" min="0" max="3500" className={inputCls} value={form.rating}
               onChange={e => setForm(f => ({ ...f, rating: e.target.value }))}
               placeholder="e.g. 2100" />
           </Field>
-
           <Field label="Level Expertise">
             <div className="flex flex-wrap gap-2">
               {LEVELS.map(l => (
@@ -143,24 +425,20 @@ function AddCoachDrawer({ open, onClose, onSave }) {
               ))}
             </div>
           </Field>
-
           <Field label="Date of Birth">
             <input type="date" className={inputCls} value={form.dob}
               onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} />
           </Field>
-
           <Field label="Phone">
             <input className={inputCls} value={form.phone}
               onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
               placeholder="+91 99999 00000" />
           </Field>
-
           <Field label="Email">
             <input type="email" className={inputCls} value={form.email}
               onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
               placeholder="coach@email.com" />
           </Field>
-
         </div>
         <div className="px-6 py-5 bg-white border-t border-gray-200 shrink-0 flex gap-3">
           <button type="button" onClick={onClose}
@@ -180,12 +458,13 @@ function AddCoachDrawer({ open, onClose, onSave }) {
 // ── Coach detail drawer ───────────────────────────────────────────────────────
 
 function CoachDetailDrawer({ coach, open, onClose }) {
-  const batches = useMemo(() => {
-    if (!coach) return [];
-    try {
-      const all = JSON.parse(localStorage.getItem("ca_batches") || "[]");
-      return all.filter(b => b.coach?.toLowerCase() === coach.name?.toLowerCase());
-    } catch { return []; }
+  const [batches, setBatches] = useState([]);
+
+  useEffect(() => {
+    if (!coach) return;
+    getBatches().then(all =>
+      setBatches(all.filter(b => b.coach?.toLowerCase() === coach.name?.toLowerCase()))
+    );
   }, [coach]);
 
   if (!coach) return null;
@@ -197,8 +476,6 @@ function CoachDetailDrawer({ coach, open, onClose }) {
   return (
     <Drawer open={open} onClose={onClose} title={coach.name}>
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
-
-        {/* Hero */}
         <div className="bg-gradient-to-br from-brand-600 to-violet-600 rounded-[24px] p-6 text-white">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-[18px] bg-white/20 flex items-center justify-center text-2xl font-black">
@@ -223,7 +500,6 @@ function CoachDetailDrawer({ coach, open, onClose }) {
           )}
         </div>
 
-        {/* Contact */}
         {(age !== null || coach.phone || coach.email) && (
           <div className="bg-white rounded-[20px] border border-gray-200 divide-y divide-gray-100 overflow-hidden">
             {age !== null && (
@@ -247,7 +523,6 @@ function CoachDetailDrawer({ coach, open, onClose }) {
           </div>
         )}
 
-        {/* Batches */}
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400 mb-3">
             Batches in this Academy ({batches.length})
@@ -266,7 +541,7 @@ function CoachDetailDrawer({ coach, open, onClose }) {
                     <p className="text-[11px] text-gray-400 mt-0.5">{b.id} · {b.level}</p>
                   </div>
                   <span className="flex items-center gap-1 text-[12px] text-gray-500 shrink-0">
-                    <Users size={12} />{b.students?.length || 0}
+                    <Users size={12} />{b.studentCount || 0}
                   </span>
                   <span className={cn("w-2 h-2 rounded-full shrink-0",
                     b.isActive !== false ? "bg-emerald-500" : "bg-red-400")} />
@@ -283,15 +558,27 @@ function CoachDetailDrawer({ coach, open, onClose }) {
 // ── Coaches tab ───────────────────────────────────────────────────────────────
 
 function CoachesTab() {
-  const [coaches, saveCoaches] = useSaved("ca_coaches", []);
-  const [showAdd, setShowAdd]  = useState(false);
+  const [coaches,  setCoaches]  = useState([]);
+  const [showAdd,  setShowAdd]  = useState(false);
   const [selected, setSelected] = useState(null);
-  const [filter, setFilter]    = useState("");
+  const [filter,   setFilter]   = useState("");
+
+  useEffect(() => { getCoaches().then(setCoaches); }, []);
 
   const filtered = useMemo(() =>
     coaches.filter(c => !filter || c.name.toLowerCase().includes(filter.toLowerCase())),
     [coaches, filter]
   );
+
+  async function handleAdd(form) {
+    const created = await createCoach(form);
+    setCoaches(prev => [...prev, created]);
+  }
+
+  async function handleDelete(id) {
+    await deleteCoach(id);
+    setCoaches(prev => prev.filter(c => c.id !== id));
+  }
 
   return (
     <>
@@ -335,7 +622,6 @@ function CoachesTab() {
           {filtered.map(coach => (
             <div key={coach.id} onClick={() => setSelected(coach)}
               className="group flex items-center gap-4 px-5 py-4 border-b border-gray-100 last:border-0 hover:bg-gray-50/60 transition-colors cursor-pointer">
-              {/* Avatar + name */}
               <div className="flex items-center gap-3 min-w-0 flex-1">
                 <div className="w-10 h-10 rounded-[14px] bg-gradient-to-br from-brand-400 to-violet-600 text-white font-black text-[15px] flex items-center justify-center shrink-0">
                   {coach.avatar}
@@ -345,13 +631,11 @@ function CoachesTab() {
                   {coach.email && <p className="text-[11px] text-gray-400 truncate">{coach.email}</p>}
                 </div>
               </div>
-              {/* Rating */}
               <div className="hidden sm:flex items-center gap-1 w-20 shrink-0">
                 {coach.rating
                   ? <><Star size={12} className="text-yellow-400 fill-yellow-400 shrink-0" /><span className="text-[13px] font-semibold text-gray-700">{coach.rating}</span></>
                   : <span className="text-[13px] text-gray-300">—</span>}
               </div>
-              {/* Level tags */}
               <div className="hidden md:flex flex-wrap gap-1 w-56 shrink-0">
                 {coach.levels?.length > 0
                   ? coach.levels.map(l => (
@@ -361,14 +645,12 @@ function CoachesTab() {
                   ))
                   : <span className="text-[12px] text-gray-300">—</span>}
               </div>
-              {/* Phone */}
               <div className="hidden sm:block w-28 shrink-0">
                 <p className="text-[12px] text-gray-400 truncate">{coach.phone || "—"}</p>
               </div>
-              {/* Actions */}
               <div className="flex items-center gap-1 shrink-0">
                 <ChevronRight size={15} className="text-gray-300 group-hover:text-gray-500 transition-colors" />
-                <button onClick={e => { e.stopPropagation(); saveCoaches(coaches.filter(c => c.id !== coach.id)); }}
+                <button onClick={e => { e.stopPropagation(); handleDelete(coach.id); }}
                   className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all">
                   <Trash2 size={13} />
                 </button>
@@ -381,7 +663,7 @@ function CoachesTab() {
       <AddCoachDrawer
         open={showAdd}
         onClose={() => setShowAdd(false)}
-        onSave={c => saveCoaches([...coaches, c])}
+        onSave={handleAdd}
       />
       <CoachDetailDrawer
         coach={selected}
@@ -394,13 +676,21 @@ function CoachesTab() {
 
 // ── Add Student drawer ────────────────────────────────────────────────────────
 
-function AddStudentDrawer({ open, onClose, onSave, existingUsernames }) {
-  const blank = { name: "", phone: "", email: "", username: "", password: "" };
-  const [form, setForm]     = useState(blank);
-  const [showPw, setShowPw] = useState(false);
-  const [error, setError]   = useState("");
+const LEVEL_PREFIX = { Beginner: "BEG", Intermediate: "INT", Advanced: "ADV", Open: "OPN" };
 
-  function handleSubmit(e) {
+function AddStudentDrawer({ open, onClose, onSave, existingUsernames, students = [] }) {
+  const blank = { name: "", phone: "", email: "", username: "", password: "", level: "", batchCode: "" };
+  const [form,    setForm]   = useState(blank);
+  const [showPw,  setShowPw] = useState(false);
+  const [error,   setError]  = useState("");
+
+  const autoCode = useMemo(() => {
+    if (!form.level) return "";
+    const count = students.filter(s => s.level === form.level).length;
+    return `${LEVEL_PREFIX[form.level] || form.level.slice(0, 3).toUpperCase()}${count + 1}`;
+  }, [form.level, students]);
+
+  async function handleSubmit(e) {
     e.preventDefault();
     if (!form.name.trim() || !form.username.trim() || !form.password.trim()) {
       setError("Name, username and password are required."); return;
@@ -409,12 +699,13 @@ function AddStudentDrawer({ open, onClose, onSave, existingUsernames }) {
       setError("Username already taken."); return;
     }
     setError("");
-    onSave({ ...form });
+    const batchCode = form.batchCode.trim() || (form.level ? autoCode : "");
+    await onSave({ ...form, batchCode });
     setForm(blank);
     onClose();
   }
 
-  function handleClose() { setError(""); onClose(); }
+  function handleClose() { setError(""); setForm(blank); onClose(); }
 
   return (
     <Drawer open={open} onClose={handleClose} title="Add Student">
@@ -425,31 +716,26 @@ function AddStudentDrawer({ open, onClose, onSave, existingUsernames }) {
               {error}
             </div>
           )}
-
           <Field label="Full Name">
             <input className={inputCls} value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
               placeholder="e.g. Arjun Kumar" autoFocus required />
           </Field>
-
           <Field label="Phone">
             <input className={inputCls} value={form.phone}
               onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
               placeholder="+91 99999 00000" />
           </Field>
-
           <Field label="Email">
             <input type="email" className={inputCls} value={form.email}
               onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
               placeholder="student@email.com" />
           </Field>
-
           <Field label="Username">
             <input className={inputCls} value={form.username}
               onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
               placeholder="e.g. arjun_k" required />
           </Field>
-
           <Field label="Password">
             <div className="relative">
               <input type={showPw ? "text" : "password"} className={cn(inputCls, "pr-12")} value={form.password}
@@ -461,8 +747,43 @@ function AddStudentDrawer({ open, onClose, onSave, existingUsernames }) {
               </button>
             </div>
           </Field>
-        </div>
 
+          <Field label="Level">
+            <div className="flex flex-wrap gap-2">
+              {LEVELS.map(lvl => (
+                <button
+                  key={lvl}
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, level: f.level === lvl ? "" : lvl }))}
+                  className={cn(
+                    "px-3 py-1.5 rounded-xl border text-[12px] font-bold transition-all",
+                    form.level === lvl
+                      ? "border-[#1a140f] bg-[#1a140f] text-white shadow-[0_3px_0_#6b4c2a]"
+                      : `${LEVEL_CHIP[lvl]} hover:opacity-80`
+                  )}
+                >
+                  {lvl}
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          <Field label="Batch Code">
+            <div className="relative">
+              <input
+                className={inputCls}
+                value={form.batchCode}
+                onChange={e => setForm(f => ({ ...f, batchCode: e.target.value }))}
+                placeholder={autoCode || "e.g. BEG3"}
+              />
+              {!form.batchCode && autoCode && (
+                <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-gray-400 pointer-events-none">
+                  auto → {autoCode}
+                </span>
+              )}
+            </div>
+          </Field>
+        </div>
         <div className="px-6 py-5 bg-white border-t border-gray-200 shrink-0 flex gap-3">
           <button type="button" onClick={handleClose}
             className="flex-1 h-12 rounded-2xl border border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition-colors">
@@ -481,34 +802,19 @@ function AddStudentDrawer({ open, onClose, onSave, existingUsernames }) {
 // ── Student profile drawer ────────────────────────────────────────────────────
 
 function StudentProfileDrawer({ student, open, onClose }) {
-  const batches = useMemo(() => {
-    if (!student) return [];
-    try {
-      const all = JSON.parse(localStorage.getItem("ca_batches") || "[]");
-      return all.filter(b =>
-        b.students?.some(s => s.name?.toLowerCase() === student.name?.toLowerCase())
-      );
-    } catch { return []; }
-  }, [student]);
+  const [batches, setBatches] = useState([]);
 
-  const attendance = useMemo(() => {
-    if (!student) return [];
-    try {
-      return JSON.parse(localStorage.getItem("ca_attendance") || "[]")
-        .filter(a => a.studentId === student.id);
-    } catch { return []; }
-  }, [student]);
+  useEffect(() => {
+    if (!student) return;
+    getBatchesForStudent(student.id).then(setBatches);
+  }, [student?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!student) return null;
-
-  const present = attendance.filter(a => a.present).length;
-  const pct     = attendance.length ? Math.round((present / attendance.length) * 100) : null;
 
   return (
     <Drawer open={open} onClose={onClose} title="Student Profile" width="max-w-[560px]">
       <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
 
-        {/* Hero */}
         <div className="bg-gradient-to-br from-brand-600 via-brand-500 to-violet-600 rounded-[24px] p-6 text-white">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-[18px] bg-white/20 flex items-center justify-center text-2xl font-black">
@@ -521,21 +827,13 @@ function StudentProfileDrawer({ student, open, onClose }) {
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            ["Batches",    batches.length],
-            ["Sessions",   attendance.length],
-            ["Attendance", pct !== null ? `${pct}%` : "—"],
-          ].map(([l, v]) => (
-            <div key={l} className="rounded-[20px] bg-white border border-gray-200 p-5 text-center shadow-sm">
-              <p className="text-2xl font-black text-brand-600 leading-none mb-1.5">{v}</p>
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">{l}</p>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 gap-3">
+          <div className="rounded-[20px] bg-white border border-gray-200 p-5 text-center shadow-sm">
+            <p className="text-2xl font-black text-brand-600 leading-none mb-1.5">{batches.length}</p>
+            <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Batches</p>
+          </div>
         </div>
 
-        {/* Contact info */}
         {(student.phone || student.email) && (
           <div className="bg-white rounded-[20px] border border-gray-200 divide-y divide-gray-100 overflow-hidden">
             {student.phone && (
@@ -553,13 +851,11 @@ function StudentProfileDrawer({ student, open, onClose }) {
           </div>
         )}
 
-        {/* Connected accounts */}
         <div className="bg-white rounded-[20px] border border-gray-200 overflow-hidden">
           <div className="px-5 py-3.5 border-b border-gray-100">
             <p className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">Connected Accounts</p>
           </div>
           <div className="divide-y divide-gray-100">
-            {/* Lichess */}
             <div className="flex items-center justify-between px-5 py-4">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-gray-800 flex items-center justify-center text-xs font-black text-gray-200 shrink-0">L</div>
@@ -577,7 +873,6 @@ function StudentProfileDrawer({ student, open, onClose }) {
                 </a>
               )}
             </div>
-            {/* Chess.com */}
             <div className="flex items-center justify-between px-5 py-4">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-green-800 flex items-center justify-center text-xs font-black text-white shrink-0">C</div>
@@ -598,7 +893,6 @@ function StudentProfileDrawer({ student, open, onClose }) {
           </div>
         </div>
 
-        {/* Batches assigned */}
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400 mb-3">
             Batches Assigned ({batches.length})
@@ -624,32 +918,6 @@ function StudentProfileDrawer({ student, open, onClose }) {
           )}
         </div>
 
-        {/* Attendance */}
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400 mb-3">
-            Attendance ({attendance.length} sessions)
-          </p>
-          {attendance.length === 0 ? (
-            <div className="bg-white rounded-[20px] border border-gray-200 py-10 flex flex-col items-center text-center">
-              <BarChart2 size={24} className="text-gray-300 mb-2" />
-              <p className="text-[13px] text-gray-400">No attendance records yet</p>
-            </div>
-          ) : (
-            <div className="bg-white rounded-[20px] border border-gray-200 divide-y divide-gray-100 overflow-hidden">
-              {attendance.slice(0, 15).map((a, i) => (
-                <div key={i} className="flex items-center justify-between px-5 py-3.5">
-                  <p className="text-[13px] text-gray-700">{a.date}</p>
-                  {a.batchName && <p className="text-[12px] text-gray-400">{a.batchName}</p>}
-                  <span className={cn("px-2.5 py-0.5 rounded-full text-[11px] font-bold",
-                    a.present ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600")}>
-                    {a.present ? "Present" : "Absent"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
       </div>
     </Drawer>
   );
@@ -658,10 +926,26 @@ function StudentProfileDrawer({ student, open, onClose }) {
 // ── Students tab ──────────────────────────────────────────────────────────────
 
 function StudentsTab() {
-  const [users, saveUsers]      = useSaved("ca_users", []);
-  const [showAdd, setShowAdd]   = useState(false);
+  const { user }                = useAuth();
+  const [academyId, setAcademyId] = useState(null);
+  const [users,    setUsers]    = useState([]);
+  const [showAdd,  setShowAdd]  = useState(false);
   const [selected, setSelected] = useState(null);
-  const [filter, setFilter]     = useState("");
+  const [filter,   setFilter]   = useState("");
+
+  useEffect(() => {
+    getAcademies().then(all => {
+      let ac = null;
+      if (user?.role === "coach")
+        ac = all.find(a => String(a.mainCoachId) === String(user?.id));
+      else if (user?.role === "admin")
+        ac = all[0] || null;
+      const id = ac?.id || null;
+      setAcademyId(id);
+      if (id) getProfilesByAcademy(id).then(setUsers);
+      else getProfiles().then(setUsers);
+    });
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const students = useMemo(() =>
     users.filter(u => u.role === "student" &&
@@ -674,18 +958,15 @@ function StudentsTab() {
 
   const existingUsernames = useMemo(() => users.map(u => u.username?.toLowerCase()), [users]);
 
-  function handleSave(form) {
-    saveUsers([...users, {
-      id: Date.now(),
-      username: form.username.trim(),
-      password: form.password,
-      name: form.name.trim(),
-      phone: form.phone.trim(),
-      email: form.email.trim(),
-      role: "student",
-      avatar: form.name.trim()[0].toUpperCase(),
-    }]);
+  async function handleSave(form) {
+    const created = await createProfile({ ...form, role: "student", academyId });
+    setUsers(prev => [...prev, created]);
     setShowAdd(false);
+  }
+
+  async function handleDelete(id) {
+    await deleteProfile(id);
+    setUsers(prev => prev.filter(u => u.id !== id));
   }
 
   return (
@@ -741,7 +1022,7 @@ function StudentsTab() {
               <p className="hidden lg:block flex-1 text-[12px] text-gray-400 truncate">{s.email || "—"}</p>
               <div className="flex items-center gap-1 shrink-0">
                 <ChevronRight size={15} className="text-gray-300 group-hover:text-gray-500 transition-colors" />
-                <button onClick={e => { e.stopPropagation(); saveUsers(users.filter(u => u.id !== s.id)); }}
+                <button onClick={e => { e.stopPropagation(); handleDelete(s.id); }}
                   className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all">
                   <Trash2 size={13} />
                 </button>
@@ -756,6 +1037,7 @@ function StudentsTab() {
         onClose={() => setShowAdd(false)}
         onSave={handleSave}
         existingUsernames={existingUsernames}
+        students={users.filter(u => u.role === "student")}
       />
       <StudentProfileDrawer
         student={selected}
@@ -775,7 +1057,6 @@ export default function AcademyPage() {
     <div className="min-h-screen bg-[#f6f8fc]">
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
 
-        {/* Tabs */}
         <div className="flex items-center border-b-2 border-gray-200 mb-7">
           {[["academy", "Academy"], ["coaches", "Coaches"], ["students", "Students"]].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)}
@@ -797,7 +1078,6 @@ export default function AcademyPage() {
         {tab === "academy"  && <AcademyTab />}
         {tab === "coaches"  && <CoachesTab />}
         {tab === "students" && <StudentsTab />}
-
       </div>
     </div>
   );

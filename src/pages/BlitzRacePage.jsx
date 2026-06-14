@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
-import { Play, Square, Trophy } from "lucide-react";
+import { Play, Square, Trophy, Check, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
 import { BOARD_THEMES } from "../lib/boardThemes";
 import racerPgnText from "../assets/racer_puzzles.pgn?raw";
+import { getRaceLeaderboard, saveRaceScore } from "../lib/db";
 
 // ── PGN parser ────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,7 @@ export default function BlitzRacePage() {
   const boardTheme = BOARD_THEMES.find(t => t.id === (user?.settings?.boardTheme ?? "brown")) || BOARD_THEMES[0];
 
   const [fen,            setFen]          = useState("");
+  const [orientation,    setOrientation]  = useState("white");
   const [solution,       setSolution]     = useState([]);
   const [solutionStep,   setSolutionStep] = useState(0);
   const [feedback,       setFeedback]     = useState("");
@@ -118,16 +120,26 @@ export default function BlitzRacePage() {
   const allPuzzlesRef   = useRef([]);
   const puzzleStatusRef = useRef({});
   const currentPuzzleRef = useRef(null);
+  const processingRef   = useRef(false);
 
   useEffect(() => { scoreRef.current = score; }, [score]);
   useEffect(() => { timerRef.current = timer;  }, [timer]);
   useEffect(() => () => clearInterval(timerInterval.current), []);
 
+  // Load leaderboard from DB on mount
+  useEffect(() => {
+    getRaceLeaderboard(10).then(scores => {
+      setLeaderboard(scores.map(e => ({ name: e.name, score: e.score, time: e.time })));
+    });
+  }, []);
+
   function fmt(s) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
 
   function applyPuzzle(pzl) {
+    processingRef.current = false;
     currentPuzzleRef.current = pzl;
     setFen(pzl.fen);
+    setOrientation(new Chess(pzl.fen).turn() === "b" ? "black" : "white");
     setSolution(pzl.solution);
     setSolutionStep(0);
     setFeedback("Find the best move!");
@@ -161,12 +173,34 @@ export default function BlitzRacePage() {
     applyPuzzle(remainingRef.current.shift());
   }
 
-  function pushLB() {
-    const s = scoreRef.current, t = fmt(timerRef.current);
+  async function pushLB() {
+    const s    = scoreRef.current;
+    const t    = timerRef.current;
+    const tFmt = fmt(t);
+    const name = user?.name || "Anonymous";
+
+    // Optimistic update
     setLeaderboard(prev =>
-      [...prev.filter(e => e.name !== "You"), { name: "You", score: s, time: t }]
+      [...prev.filter(e => e.name !== name), { name, score: s, time: tFmt }]
         .sort((a, b) => b.score - a.score)
+        .slice(0, 10)
     );
+
+    try {
+      await saveRaceScore({
+        userId:      user?.id   || null,
+        userName:    name,
+        score:       s,
+        wrongCount:  wrongRef.current,
+        timeSeconds: t,
+        timeFmt:     tFmt,
+      });
+      // Refresh from DB to get global leaderboard
+      const fresh = await getRaceLeaderboard(10);
+      setLeaderboard(fresh.map(e => ({ name: e.name, score: e.score, time: e.time })));
+    } catch (err) {
+      console.error("Failed to save race score:", err);
+    }
   }
 
   function stopRace() {
@@ -201,7 +235,7 @@ export default function BlitzRacePage() {
   // Returns: "invalid" | "wrong" | "correct"
 
   function handleMove(from, to) {
-    if (!running || !fen || !solution.length) return "invalid";
+    if (processingRef.current || !running || !fen || !solution.length) return "invalid";
 
     // 1. Check chess legality first
     const testGame = new Chess(fen);
@@ -220,6 +254,7 @@ export default function BlitzRacePage() {
         puzzleStatusRef.current = { ...puzzleStatusRef.current, [id]: "wrong" };
       const nw = wrongRef.current + 1; wrongRef.current = nw; setWrongCount(nw);
       setFeedback("Wrong! Moving to next puzzle...");
+      processingRef.current = true;
       const sid = currentPuzzleRef.current?.id;
       setTimeout(() => advanceNext(sid), 700);
       return "wrong";
@@ -238,22 +273,25 @@ export default function BlitzRacePage() {
     if (nextStep >= solution.length) {
       setFen(newFen);
       const ns = scoreRef.current + 1; setScore(ns); scoreRef.current = ns;
-      setLeaderboard(prev =>
-        [...prev.filter(e => e.name !== "You"), { name: "You", score: ns, time: fmt(timerRef.current) }]
-          .sort((a, b) => b.score - a.score)
-      );
       setFeedback("Correct! +1");
+      processingRef.current = true;
       setTimeout(() => advanceNext(currentPuzzleRef.current?.id), 800);
       return "correct";
     }
 
-    // Auto-play opponent's response
-    const opp = solution[nextStep], g2 = new Chess(newFen);
-    let oppOk = false;
-    try { oppOk = !!g2.move({ from: opp.slice(0, 2), to: opp.slice(2, 4), promotion: opp[4] || "q" }); } catch {}
-    setFen(oppOk ? g2.fen() : newFen);
-    setSolutionStep(oppOk ? nextStep + 1 : nextStep);
+    // Show player's move, then delay opponent response
+    setFen(newFen);
     setFeedback("Good! Keep going...");
+    processingRef.current = true;
+    setTimeout(() => {
+      const opp = solution[nextStep];
+      const g2 = new Chess(newFen);
+      let oppOk = false;
+      try { oppOk = !!g2.move({ from: opp.slice(0, 2), to: opp.slice(2, 4), promotion: opp[4] || "q" }); } catch {}
+      setFen(oppOk ? g2.fen() : newFen);
+      setSolutionStep(oppOk ? nextStep + 1 : nextStep);
+      processingRef.current = false;
+    }, 400);
     return "correct";
   }
 
@@ -298,108 +336,130 @@ export default function BlitzRacePage() {
     ? "good" : feedback.includes("Wrong") ? "bad" : "neutral";
 
   return (
-    <div className="min-h-screen bg-[#f6f8fc]">
-      <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
+    <div className="flex bg-white overflow-hidden" style={{ height: "calc(100vh - 70px)" }}>
 
-        <div className="flex flex-col lg:flex-row gap-6 items-start">
+      {/* ── Board column ── */}
+      <div className="flex-1 flex items-center justify-center min-w-0 overflow-hidden p-4">
+        <div style={{ width: "min(70%, calc(100vh - 140px))", maxWidth: "min(70%, calc(100vh - 140px))" }}>
+          <div className="overflow-hidden rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
+            <Chessboard options={{
+              position: fen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+              boardOrientation: orientation,
+              onPieceDrop: onDrop,
+              onSquareClick: onSquareClick,
+              allowDragging: running,
+              canDragPiece: ({ piece }) => {
+                if (!running || !fen) return false;
+                return piece.pieceType[0] === new Chess(fen).turn();
+              },
+              dragActivationDistance: 3,
+              squareStyles: squareStyles,
+              darkSquareStyle:  { backgroundColor: boardTheme.dark },
+              lightSquareStyle: { backgroundColor: boardTheme.light },
+              boardStyle: { borderRadius: 0 },
+            }} />
+          </div>
+        </div>
+      </div>
 
-          {/* Left — board */}
-          <div className="flex-1 min-w-0 space-y-4">
+      {/* ── Right panel ── */}
+      <div className="w-[340px] shrink-0 flex flex-col gap-4 p-4 overflow-y-auto">
+
+        {/* ── Stats + timer card ── */}
+        <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-5">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div className="flex gap-8">
+              <div>
+                <p className="text-[11px] text-gray-400 mb-1">Correct</p>
+                <p className="text-[34px] font-black text-emerald-500 leading-none">{score}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400 mb-1">Wrong</p>
+                <p className="text-[34px] font-black text-red-500 leading-none">{wrongCount}</p>
+              </div>
+            </div>
+            {/* Timer badge */}
+            <div className="flex flex-col items-center justify-center w-20 h-16 rounded-[16px] border-2 border-gray-100 bg-gray-50 shrink-0">
+              <p className="text-[22px] font-black text-gray-900 font-mono leading-none">{fmt(timer)}</p>
+              <p className="text-[9px] font-bold text-gray-400 mt-0.5 uppercase tracking-wide">{running ? "running" : "stopped"}</p>
+            </div>
+          </div>
+
+          {/* Start / Stop */}
+          {!running ? (
+            <button onClick={startRace}
+              className="w-full h-11 rounded-2xl bg-[#f97316] hover:bg-[#ea6c00] text-white text-[14px] font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-orange-500/20">
+              <Play size={15} />Start Race
+            </button>
+          ) : (
+            <button onClick={stopRace}
+              className="w-full h-11 rounded-2xl bg-red-500 hover:bg-red-600 text-white text-[14px] font-bold flex items-center justify-center gap-2 transition-colors">
+              <Square size={13} />Stop Race
+            </button>
+          )}
+        </div>
+
+        {/* ── Feedback + leaderboard card ── */}
+        <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-5 flex flex-col gap-5">
+
+          {/* Feedback */}
+          <div className="flex flex-col items-center py-4 border-b border-gray-100">
             <AnimatePresence mode="wait">
-              {feedback && (
-                <motion.div key={feedback}
-                  initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                  transition={{ duration: 0.18 }}
-                  className={cn(
-                    "px-5 py-3.5 rounded-[18px] text-[14px] font-semibold border",
-                    feedbackType === "good" ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                    : feedbackType === "bad" ? "bg-red-50 text-red-700 border-red-200"
-                    : "bg-white text-gray-600 border-gray-200"
-                  )}>
-                  {feedback}
-                </motion.div>
-              )}
+              <motion.div key={feedbackType}
+                initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.8, opacity: 0 }} transition={{ duration: 0.18 }}
+                className="flex flex-col items-center gap-2">
+                <div className={cn(
+                  "w-14 h-14 rounded-full border-2 flex items-center justify-center mb-1",
+                  feedbackType === "good" ? "border-emerald-500 text-emerald-500 bg-emerald-50"
+                  : feedbackType === "bad" ? "border-red-500 text-red-500 bg-red-50"
+                  : "border-gray-200 text-gray-400 bg-gray-50"
+                )}>
+                  {feedbackType === "good" ? <Check size={26} strokeWidth={3} />
+                  : feedbackType === "bad"  ? <X    size={26} strokeWidth={3} />
+                  : <span className="text-[22px] leading-none">♟</span>}
+                </div>
+                <p className={cn("text-[20px] font-black leading-tight",
+                  feedbackType === "good" ? "text-gray-900"
+                  : feedbackType === "bad" ? "text-red-600"
+                  : "text-gray-700")}>
+                  {feedbackType === "good" ? "Correct !!"
+                  : feedbackType === "bad" ? "Wrong!"
+                  : running ? "Your turn" : "Ready?"}
+                </p>
+                <p className="text-[12px] text-gray-400 text-center">
+                  {feedbackType === "good" ? "Great job! Keep it going."
+                  : feedbackType === "bad" ? "Next puzzle coming up."
+                  : running ? "Find the best move!" : "Press Start Race to begin."}
+                </p>
+              </motion.div>
             </AnimatePresence>
+          </div>
 
-            <div style={{ width: "min(100%, calc(100vh - 260px))", maxWidth: 540 }}>
-              <div className="overflow-hidden shadow-[0_8px_40px_rgba(0,0,0,0.12)]">
-                <Chessboard options={{
-                  position: fen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                  boardOrientation: fen ? (fen.split(" ")[1] === "b" ? "black" : "white") : "white",
-                  onPieceDrop: onDrop,
-                  onSquareClick: onSquareClick,
-                  allowDragging: running,
-                  canDragPiece: ({ piece }) => {
-                    if (!running || !fen) return false;
-                    return piece.pieceType[0] === new Chess(fen).turn();
-                  },
-                  dragActivationDistance: 3,
-                  squareStyles: squareStyles,
-                  darkSquareStyle:  { backgroundColor: boardTheme.dark },
-                  lightSquareStyle: { backgroundColor: boardTheme.light },
-                  boardStyle: { borderRadius: 0 },
-                }} />
-              </div>
+          {/* Leaderboard */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Trophy size={13} className="text-amber-500" />
+              <p className="text-[12px] font-bold text-gray-500">Leaderboard</p>
+            </div>
+            <div className="space-y-1.5">
+              {leaderboard.length === 0 ? (
+                <p className="text-[12px] text-gray-400 text-center py-2">No scores yet</p>
+              ) : leaderboard.map((e, i) => (
+                <div key={i} className={cn(
+                  "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[12px] border",
+                  e.name === user?.name ? "bg-orange-50 border-orange-200 font-bold" : "bg-gray-50 border-gray-100"
+                )}>
+                  <span className="w-5 text-center text-[11px] shrink-0 font-bold text-gray-500">
+                    {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}
+                  </span>
+                  <span className="flex-1 text-gray-700 truncate">{e.name}</span>
+                  <span className={cn("font-bold shrink-0", e.name === user?.name ? "text-[#f97316]" : "text-gray-500")}>{e.score}</span>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* Right — stats + leaderboard */}
-          <div className="w-full lg:w-64 shrink-0 space-y-4">
-
-            <div className="space-y-3">
-              {!running && (
-                <button onClick={startRace}
-                  className="w-full flex items-center justify-center gap-2 h-11 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-bold shadow-lg shadow-brand-500/20 transition-all">
-                  <Play size={15} />Start Race
-                </button>
-              )}
-              <RoundTimer timer={timer} running={running} fmt={fmt} />
-              {running && (
-                <button onClick={stopRace}
-                  className="w-full flex items-center justify-center gap-2 h-10 rounded-2xl bg-red-500 hover:bg-red-600 text-white text-[13px] font-bold transition-colors">
-                  <Square size={13} />Stop Race
-                </button>
-              )}
-            </div>
-
-            <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm p-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-3 text-center">Score</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col items-center py-4 rounded-2xl bg-emerald-50 border border-emerald-100">
-                  <span className="text-[32px] font-black text-emerald-600 leading-none">{score}</span>
-                  <span className="text-[11px] font-bold text-emerald-500 mt-1.5 uppercase tracking-wide">Correct</span>
-                </div>
-                <div className="flex flex-col items-center py-4 rounded-2xl bg-red-50 border border-red-100">
-                  <span className="text-[32px] font-black text-red-500 leading-none">{wrongCount}</span>
-                  <span className="text-[11px] font-bold text-red-400 mt-1.5 uppercase tracking-wide">Wrong</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
-              <div className="flex items-center gap-2.5 px-5 py-4 border-b border-gray-100">
-                <div className="w-7 h-7 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
-                  <Trophy size={13} className="text-amber-500" />
-                </div>
-                <h2 className="font-black text-[13px] text-gray-900">Leaderboard</h2>
-              </div>
-              <div className="p-3 space-y-1.5">
-                {leaderboard.map((e, i) => (
-                  <div key={i} className={cn(
-                    "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[12px] border",
-                    e.name === "You" ? "bg-brand-50 border-brand-200 font-bold" : "bg-gray-50 border-gray-100"
-                  )}>
-                    <span className="w-5 text-center text-[11px] shrink-0">
-                      {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}
-                    </span>
-                    <span className="flex-1 text-gray-700 truncate">{e.name}</span>
-                    <span className={cn("font-bold shrink-0", e.name === "You" ? "text-brand-600" : "text-gray-500")}>{e.score}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-          </div>
         </div>
       </div>
     </div>

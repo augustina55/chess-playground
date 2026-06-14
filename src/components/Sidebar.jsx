@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -8,9 +8,12 @@ import {
   FileText,
   Building2,
   Settings,
+  Activity,
   Menu,
   X,
-  ChevronDown,
+  NotebookPen,
+  GraduationCap,
+  Swords,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/utils";
@@ -20,15 +23,19 @@ const NAV_SECTIONS = [
     label: "ACADEMIC",
     items: [
       { id: "batches", icon: Users, label: "Batches" },
+      { id: "learn", icon: GraduationCap, label: "Learn Chess", roles: ["admin"] },
       { id: "homework", icon: BookOpen, label: "Homework" },
-      { id: "pgn-center", icon: FileText, label: "PGN Center" },
+      { id: "class-notes", icon: NotebookPen, label: "Class Notes" },
+      { id: "pgn-center", icon: FileText, label: "PGN Center", roles: ["admin", "coach"] },
     ],
   },
   {
     label: "TOOLS",
     items: [
       { id: "home", icon: LayoutDashboard, label: "Dashboard" },
+      { id: "play", icon: Swords, label: "Play Chess" },
       { id: "blitz-race", icon: Zap, label: "Blitz Race" },
+      { id: "activity", icon: Activity, label: "My Activity" },
     ],
   },
   {
@@ -64,52 +71,29 @@ function NavItem({ item, active, onClick }) {
   );
 }
 
-function getAcademyName(user) {
-  if (!user || user.role === "admin") return "Chess Academy";
-  try {
-    const academies = JSON.parse(localStorage.getItem("ca_academies") || "[]");
-    if (user.role === "coach")
-      return academies.find(a => String(a.mainCoachId) === String(user.id))?.name || "Chess Academy";
-    if (user.role === "student")
-      return academies.find(a => String(a.id) === String(user.academyId))?.name || "Chess Academy";
-  } catch {}
-  return "Chess Academy";
-}
-
 function SidebarContent({ active, user, onNav, onItemClick }) {
-  const academyName = getAcademyName(user);
+  const [logo, setLogo] = useState(() => localStorage.getItem("ca_academy_logo") || "");
+
+  useEffect(() => {
+    const sync = () => setLogo(localStorage.getItem("ca_academy_logo") || "");
+    window.addEventListener("ca-logo-update", sync);
+    return () => window.removeEventListener("ca-logo-update", sync);
+  }, []);
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 border-b-2 border-white/10 px-5 py-5">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-[18px] border-2 border-[#1a140f] bg-[#f97316] text-[22px] text-white shadow-[0_6px_0_#1a140f]">
-            ♞
+          <div className="flex h-12 w-12 items-center justify-center rounded-[18px] border-2 border-[#1a140f] bg-[#f97316] text-[22px] text-white shadow-[0_6px_0_#1a140f] overflow-hidden shrink-0">
+            {logo
+              ? <img src={logo} alt="logo" className="w-full h-full object-cover" />
+              : "♞"
+            }
           </div>
           <div className="min-w-0">
-            <p className="text-[16px] font-black tracking-tight text-white">{academyName}</p>
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#c7ad90]">
-              Coach workspace
-            </p>
+            <p className="text-[16px] font-black tracking-tight text-white">Chessground</p>
           </div>
         </div>
 
-        <div className="mt-4 rounded-[20px] border-2 border-[#1a140f] bg-[#fff4e7] px-4 py-3 text-[#1a140f] shadow-[0_5px_0_#1a140f]">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#8b5a3c]">
-            Active member
-          </p>
-          <div className="mt-2 flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#1a140f] bg-[#1a140f] text-xs font-black text-white">
-              {user?.avatar || "?"}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-bold leading-tight">{user?.name}</p>
-              <p className="truncate text-[11px] font-medium capitalize text-[#6f5c49]">
-                {user?.role}
-              </p>
-            </div>
-            <ChevronDown size={15} className="shrink-0 text-[#6f5c49]" />
-          </div>
-        </div>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">

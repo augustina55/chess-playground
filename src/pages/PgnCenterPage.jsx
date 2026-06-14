@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Upload, FileText, Zap, Trash2, Sparkles } from "lucide-react";
 import { Chess } from "chess.js";
 import { cn } from "../lib/utils";
+import { getPgns, createPgn, deletePgn } from "../lib/db";
 
 function extractPuzzles(pgnId, content) {
   const puzzles = [];
@@ -25,11 +26,6 @@ function extractPuzzles(pgnId, content) {
   return puzzles;
 }
 
-function loadPgns()    { try { return JSON.parse(localStorage.getItem("ca_pgns")    || "[]"); } catch { return []; } }
-function loadPuzzles() { try { return JSON.parse(localStorage.getItem("ca_puzzles") || "[]"); } catch { return []; } }
-function savePgns(v)    { localStorage.setItem("ca_pgns",    JSON.stringify(v)); }
-function savePuzzles(v) { localStorage.setItem("ca_puzzles", JSON.stringify(v)); }
-
 const TYPE_STYLES = {
   racer:  "bg-orange-50 text-orange-700",
   puzzle: "bg-brand-50 text-brand-700",
@@ -39,11 +35,14 @@ const TYPE_STYLES = {
 const inputCls = "w-full h-12 rounded-xl border border-gray-200 bg-white px-4 text-sm text-gray-800 placeholder:text-gray-400 outline-none transition-all focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500";
 
 export default function PgnCenterPage({ search }) {
-  const [pgns, setPgns]               = useState(loadPgns);
-  const [form, setForm]               = useState({ name: "", type: "racer", content: "" });
+  const [pgns, setPgns]                   = useState([]);
+  const [form, setForm]                   = useState({ name: "", type: "racer", content: "" });
   const [lastExtracted, setLastExtracted] = useState(null);
+  const [saving, setSaving]               = useState(false);
 
-  function save(updated) { setPgns(updated); savePgns(updated); }
+  useEffect(() => {
+    getPgns().then(setPgns);
+  }, []);
 
   function handleFile(e) {
     const file = e.target.files[0];
@@ -53,20 +52,30 @@ export default function PgnCenterPage({ search }) {
     reader.readAsText(file);
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.content.trim()) return;
-    const id = `PGN-${String(pgns.length + 1).padStart(3, "0")}`;
-    const puzzles = extractPuzzles(id, form.content);
-    savePuzzles([...loadPuzzles().filter(p => p.pgnId !== id), ...puzzles]);
-    setLastExtracted(puzzles.length);
-    save([...pgns, { id, name: form.name || "Unnamed", type: form.type, content: form.content, date: new Date().toLocaleDateString(), puzzleCount: puzzles.length }]);
-    setForm({ name: "", type: "racer", content: "" });
+    if (!form.content.trim() || saving) return;
+    setSaving(true);
+    try {
+      const id       = `PGN-${String(pgns.length + 1).padStart(3, "0")}`;
+      const puzzles  = extractPuzzles(id, form.content);
+      const pgnData  = {
+        id, name: form.name || "Unnamed", type: form.type,
+        content: form.content, date: new Date().toLocaleDateString(),
+        puzzleCount: puzzles.length,
+      };
+      const created = await createPgn(pgnData, puzzles);
+      setPgns(prev => [...prev, created]);
+      setLastExtracted(puzzles.length);
+      setForm({ name: "", type: "racer", content: "" });
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function deletePgn(id) {
-    savePuzzles(loadPuzzles().filter(p => p.pgnId !== id));
-    save(pgns.filter(p => p.id !== id));
+  async function handleDelete(id) {
+    await deletePgn(id);
+    setPgns(prev => prev.filter(p => p.id !== id));
     setLastExtracted(null);
   }
 
@@ -77,7 +86,6 @@ export default function PgnCenterPage({ search }) {
   return (
     <div className="min-h-screen bg-[#f6f8fc]">
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
-
 
         <div className="flex flex-col lg:flex-row gap-6 items-start">
           {/* Upload form */}
@@ -117,8 +125,9 @@ export default function PgnCenterPage({ search }) {
                   <label className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400">Upload .pgn file</label>
                   <input type="file" accept=".pgn" onChange={handleFile} className="text-sm text-gray-500 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-600 file:text-xs file:font-semibold cursor-pointer" />
                 </div>
-                <button type="submit" className="w-full h-12 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2">
-                  <Upload size={14} />Add PGN
+                <button type="submit" disabled={saving}
+                  className="w-full h-12 rounded-xl bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2">
+                  <Upload size={14} />{saving ? "Saving…" : "Add PGN"}
                 </button>
               </form>
               {lastExtracted !== null && (
@@ -170,7 +179,7 @@ export default function PgnCenterPage({ search }) {
                         <td className="px-6 py-4 font-bold text-gray-700">{p.puzzleCount ?? "—"}</td>
                         <td className="px-6 py-4 text-gray-400 text-[13px] hidden sm:table-cell">{p.date}</td>
                         <td className="px-6 py-4 text-right">
-                          <button onClick={() => deletePgn(p.id)} className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all ml-auto">
+                          <button onClick={() => handleDelete(p.id)} className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all ml-auto">
                             <Trash2 size={13} />
                           </button>
                         </td>

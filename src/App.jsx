@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { exchangeLichessCode } from "./utils/lichess";
+import { getAcademies } from "./lib/db";
 import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
 import BatchesPage from "./pages/BatchesPage";
@@ -9,6 +10,10 @@ import HomeworkPage from "./pages/HomeworkPage";
 import PgnCenterPage from "./pages/PgnCenterPage";
 import AdminPage from "./pages/AdminPage";
 import AcademyPage from "./pages/AcademyPage";
+import ActivityPage from "./pages/ActivityPage";
+import ClassNotesPage from "./pages/ClassNotesPage";
+import LearnPage from "./pages/LearnPage";
+import PlayPage from "./pages/PlayPage";
 import ProfilePage from "./pages/ProfilePage";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -18,6 +23,20 @@ function MainApp() {
   const { user, updateUser } = useAuth();
   const [page, setPage] = useState("home");
   const [showProfile, setShowProfile] = useState(false);
+
+  // Load academy name + logo for the current user on login so Header shows it immediately
+  useEffect(() => {
+    if (!user || user.role === "admin") return;
+    getAcademies().then(all => {
+      let ac = null;
+      if (user.role === "coach")   ac = all.find(a => String(a.mainCoachId) === String(user.id));
+      if (user.role === "student") ac = all.find(a => String(a.id) === String(user.academyId));
+      if (!ac) return;
+      if (ac.name) localStorage.setItem("ca_academy_name", ac.name);
+      if (ac.logo) localStorage.setItem("ca_academy_logo", ac.logo);
+      window.dispatchEvent(new CustomEvent("ca-logo-update"));
+    }).catch(() => {});
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -57,7 +76,11 @@ function MainApp() {
               {page === "blitz-race" && <BlitzRacePage />}
               {page === "homework"   && <HomeworkPage />}
               {page === "pgn-center" && <PgnCenterPage />}
-              {page === "academy"    && (user?.role === "admin" || user?.role === "coach") && <AcademyPage />}
+              {page === "activity"    && <ActivityPage />}
+              {page === "play"        && <PlayPage />}
+              {page === "learn"       && <LearnPage />}
+              {page === "class-notes" && <ClassNotesPage />}
+{page === "academy"    && (user?.role === "admin" || user?.role === "coach") && <AcademyPage />}
               {page === "admin"      && user?.role === "admin" && <AdminPage />}
             </div>
           </main>

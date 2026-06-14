@@ -76,7 +76,8 @@ export default function LoginPage() {
     if (!username.trim() || !password.trim()) { setError("Please enter username and password"); return; }
     setLoading(true); setError("");
     await new Promise(r => setTimeout(r, 500));
-    if (!login(username.trim(), password)) setError("Invalid username or password");
+    const ok = await login(username.trim(), password);
+    if (!ok) setError("Invalid username or password");
     setLoading(false);
   }
 

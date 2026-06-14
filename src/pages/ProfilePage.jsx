@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, LogOut, Check, ExternalLink, Unlink, Eye, EyeOff,
-  Activity, Bell, Palette,
+  Bell, Palette,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { startLichessOAuth } from "../utils/lichess";
@@ -75,10 +75,6 @@ function MyProfileTab({ onBack }) {
   const [ccLoading, setCcLoading]   = useState(false);
   const [ccError,   setCcError]     = useState("");
 
-  const batches  = JSON.parse(localStorage.getItem("ca_batches")  || "[]");
-  const homework = JSON.parse(localStorage.getItem("ca_homework") || "[]");
-  const pgns     = JSON.parse(localStorage.getItem("ca_pgns")     || "[]");
-
   async function verifyChessCom() {
     if (!ccUser.trim()) return;
     setCcLoading(true); setCcError("");
@@ -118,30 +114,6 @@ function MyProfileTab({ onBack }) {
             </span>
           </div>
         </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-3">
-          {[["Batches", batches.length], ["PGNs", pgns.length], ["Homework", homework.length]].map(([l, v]) => (
-            <div key={l} className="rounded-[20px] bg-white border border-gray-200 p-5 text-center shadow-sm">
-              <p className="text-2xl font-black text-brand-600 leading-none mb-1.5">{v}</p>
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">{l}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* My Activity (placeholder) */}
-        <button className="w-full flex items-center gap-3 p-4 rounded-[20px] bg-white border border-gray-200 shadow-sm hover:border-brand-300 hover:bg-brand-50/30 transition-all group">
-          <div className="w-10 h-10 rounded-[14px] bg-brand-50 flex items-center justify-center shrink-0 group-hover:bg-brand-100 transition-colors">
-            <Activity size={18} className="text-brand-600" />
-          </div>
-          <div className="min-w-0 flex-1 text-left">
-            <p className="text-[13px] font-bold text-gray-800">My Activity</p>
-            <p className="text-[11px] text-gray-400 mt-0.5">Games, sessions and history</p>
-          </div>
-          <span className="shrink-0 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-[10px] font-bold text-amber-600">
-            Coming Soon
-          </span>
-        </button>
 
         {/* Switch role (admin only) */}
         {(realUser?.role === "admin" || user?.role === "admin") && (
