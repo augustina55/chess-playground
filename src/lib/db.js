@@ -1,5 +1,10 @@
 import { supabase } from './supabase'
 
+function db() {
+  if (!supabase) throw new Error('Database not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
+  return supabase
+}
+
 // ── Profiles (auth + users) ───────────────────────────────────────────────────
 
 function profileFromDb(row) {
@@ -24,7 +29,7 @@ function profileFromDb(row) {
 }
 
 export async function loginUser(username, password) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('profiles')
     .select('*')
     .eq('username', username.toLowerCase().trim())
@@ -35,12 +40,12 @@ export async function loginUser(username, password) {
 }
 
 export async function getProfiles() {
-  const { data } = await supabase.from('profiles').select('*').order('created_at')
+  const { data } = await db().from('profiles').select('*').order('created_at')
   return (data || []).map(profileFromDb)
 }
 
 export async function createProfile({ username, password, name, role, avatar, phone, email, level, batchCode, academyId }) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('profiles')
     .insert({
       username:   username.trim().toLowerCase(),
@@ -63,7 +68,7 @@ export async function createProfile({ username, password, name, role, avatar, ph
 
 export async function getProfilesByAcademy(academyId) {
   if (!academyId) return getProfiles()
-  const { data } = await supabase
+  const { data } = await db()
     .from('profiles')
     .select('*')
     .eq('academy_id', academyId)
@@ -72,7 +77,7 @@ export async function getProfilesByAcademy(academyId) {
 }
 
 export async function deleteProfile(id) {
-  const { error } = await supabase.from('profiles').delete().eq('id', id)
+  const { error } = await db().from('profiles').delete().eq('id', id)
   if (error) throw error
 }
 
@@ -87,7 +92,7 @@ export async function updateProfile(id, patch) {
   if (patch.settings    !== undefined) dbPatch.settings     = patch.settings
   if (patch.rating      !== undefined) dbPatch.rating       = patch.rating
   if (patch.dob         !== undefined) dbPatch.dob          = patch.dob
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('profiles').update(dbPatch).eq('id', id).select().single()
   if (error) throw error
   return profileFromDb(data)
@@ -113,12 +118,12 @@ function batchFromDb(row) {
 }
 
 export async function getBatches() {
-  const { data } = await supabase.from('batches').select('*').order('created_at')
+  const { data } = await db().from('batches').select('*').order('created_at')
   return (data || []).map(batchFromDb)
 }
 
 export async function createBatch(batch) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('batches')
     .insert({
       id:           batch.id,
@@ -141,7 +146,7 @@ export async function createBatch(batch) {
 
 export async function getBatchesByAcademy(academyId) {
   if (!academyId) return getBatches()
-  const { data } = await supabase
+  const { data } = await db()
     .from('batches')
     .select('*')
     .eq('academy_id', academyId)
@@ -150,7 +155,7 @@ export async function getBatchesByAcademy(academyId) {
 }
 
 export async function deleteBatch(id) {
-  const { error } = await supabase.from('batches').delete().eq('id', id)
+  const { error } = await db().from('batches').delete().eq('id', id)
   if (error) throw error
 }
 
@@ -168,12 +173,12 @@ function pgnFromDb(row) {
 }
 
 export async function getPgns() {
-  const { data } = await supabase.from('pgns').select('*').order('created_at')
+  const { data } = await db().from('pgns').select('*').order('created_at')
   return (data || []).map(pgnFromDb)
 }
 
 export async function createPgn(pgn, puzzles = []) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('pgns')
     .insert({
       id:           pgn.id,
@@ -195,7 +200,7 @@ export async function createPgn(pgn, puzzles = []) {
       solution: p.solution,
       name:     p.name || null,
     }))
-    const { error: pe } = await supabase.from('puzzles').insert(rows)
+    const { error: pe } = await db().from('puzzles').insert(rows)
     if (pe) throw pe
   }
 
@@ -203,7 +208,7 @@ export async function createPgn(pgn, puzzles = []) {
 }
 
 export async function deletePgn(id) {
-  const { error } = await supabase.from('pgns').delete().eq('id', id)
+  const { error } = await db().from('pgns').delete().eq('id', id)
   if (error) throw error
 }
 
@@ -221,7 +226,7 @@ function puzzleFromDb(row) {
 
 export async function getPuzzlesByPgnId(pgnId) {
   if (!pgnId) return []
-  const { data } = await supabase
+  const { data } = await db()
     .from('puzzles')
     .select('*')
     .eq('pgn_id', pgnId)
@@ -248,7 +253,7 @@ function hwFromDb(row) {
 }
 
 export async function getHomework() {
-  const { data } = await supabase
+  const { data } = await db()
     .from('homework')
     .select('*')
     .order('created_at', { ascending: false })
@@ -256,7 +261,7 @@ export async function getHomework() {
 }
 
 export async function createHomework(hw) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('homework')
     .insert({
       id:          hw.id,
@@ -277,13 +282,13 @@ export async function createHomework(hw) {
 }
 
 export async function deleteHomework(id) {
-  const { error } = await supabase.from('homework').delete().eq('id', id)
+  const { error } = await db().from('homework').delete().eq('id', id)
   if (error) throw error
 }
 
 export async function getHomeworkForBatch(batchCode) {
   if (!batchCode) return []
-  const { data } = await supabase
+  const { data } = await db()
     .from('homework')
     .select('*')
     .eq('batch_id', batchCode)
@@ -293,7 +298,7 @@ export async function getHomeworkForBatch(batchCode) {
 
 export async function getHomeworkByAcademy(academyId) {
   if (!academyId) return getHomework()
-  const { data } = await supabase
+  const { data } = await db()
     .from('homework')
     .select('*')
     .eq('academy_id', academyId)
@@ -317,7 +322,7 @@ function hwProgressFromDb(row) {
 }
 
 export async function getHomeworkProgress(homeworkId, studentId) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('homework_progress')
     .select('*')
     .eq('homework_id', homeworkId)
@@ -331,7 +336,7 @@ export async function getHomeworkProgress(homeworkId, studentId) {
 
 // Fetch full progress detail for a student (all HW, with timestamps + time_seconds)
 export async function getFullHomeworkProgressForStudent(studentId) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('homework_progress')
     .select('homework_id, puzzle_id, solved, time_seconds, updated_at')
     .eq('student_id', studentId)
@@ -345,7 +350,7 @@ export async function getFullHomeworkProgressForStudent(studentId) {
 // Fetch all progress rows for a student across multiple homework IDs (one query)
 export async function getAllHomeworkProgressForStudent(studentId, homeworkIds) {
   if (!homeworkIds || homeworkIds.length === 0) return []
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('homework_progress')
     .select('homework_id, puzzle_id, solved')
     .eq('student_id', studentId)
@@ -358,7 +363,7 @@ export async function getAllHomeworkProgressForStudent(studentId, homeworkIds) {
 }
 
 export async function saveHomeworkPuzzleResult(homeworkId, studentId, puzzleId, { solved, wrongCount, timeSeconds }) {
-  const { error } = await supabase
+  const { error } = await db()
     .from('homework_progress')
     .upsert({
       homework_id:  homeworkId,
@@ -391,7 +396,7 @@ function scoreFromDb(row) {
 }
 
 export async function getRaceLeaderboard(limit = 10) {
-  const { data } = await supabase
+  const { data } = await db()
     .from('race_scores')
     .select('*')
     .order('score', { ascending: false })
@@ -400,7 +405,7 @@ export async function getRaceLeaderboard(limit = 10) {
 }
 
 export async function getRaceScoresByUser(userId, limit = 20) {
-  const { data } = await supabase
+  const { data } = await db()
     .from('race_scores')
     .select('*')
     .eq('user_id', userId)
@@ -410,7 +415,7 @@ export async function getRaceScoresByUser(userId, limit = 20) {
 }
 
 export async function saveRaceScore({ userId, userName, score, wrongCount, timeSeconds, timeFmt }) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('race_scores')
     .insert({
       user_id:      userId       || null,
@@ -442,12 +447,12 @@ function coachFromDb(row) {
 }
 
 export async function getCoaches() {
-  const { data } = await supabase.from('coaches').select('*').order('created_at')
+  const { data } = await db().from('coaches').select('*').order('created_at')
   return (data || []).map(coachFromDb)
 }
 
 export async function createCoach(coach) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('coaches')
     .insert({
       name:   coach.name,
@@ -465,7 +470,7 @@ export async function createCoach(coach) {
 }
 
 export async function deleteCoach(id) {
-  const { error } = await supabase.from('coaches').delete().eq('id', id)
+  const { error } = await db().from('coaches').delete().eq('id', id)
   if (error) throw error
 }
 
@@ -484,12 +489,12 @@ function academyFromDb(row) {
 }
 
 export async function getAcademies() {
-  const { data } = await supabase.from('academies').select('*').order('created_at')
+  const { data } = await db().from('academies').select('*').order('created_at')
   return (data || []).map(academyFromDb)
 }
 
 export async function createAcademy(ac) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('academies')
     .insert({
       name:          ac.name,
@@ -505,7 +510,7 @@ export async function createAcademy(ac) {
 }
 
 export async function updateAcademy(id, patch) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('academies')
     .update({
       ...(patch.name      !== undefined && { name: patch.name }),
@@ -521,20 +526,20 @@ export async function updateAcademy(id, patch) {
 }
 
 export async function deleteAcademy(id) {
-  const { error } = await supabase.from('academies').delete().eq('id', id)
+  const { error } = await db().from('academies').delete().eq('id', id)
   if (error) throw error
 }
 
 // ── Batch Students (junction) ─────────────────────────────────────────────────
 
 export async function getBatchesForStudent(studentId) {
-  const { data } = await supabase
+  const { data } = await db()
     .from('batch_students')
     .select('batch_id')
     .eq('student_id', studentId)
   if (!data || data.length === 0) return []
   const ids = data.map(r => r.batch_id)
-  const { data: batches } = await supabase
+  const { data: batches } = await db()
     .from('batches')
     .select('*')
     .in('id', ids)
@@ -543,13 +548,13 @@ export async function getBatchesForStudent(studentId) {
 }
 
 export async function getBatchStudents(batchId) {
-  const { data } = await supabase
+  const { data } = await db()
     .from('batch_students')
     .select('student_id')
     .eq('batch_id', batchId)
   if (!data || data.length === 0) return []
   const ids = data.map(r => r.student_id)
-  const { data: profiles } = await supabase
+  const { data: profiles } = await db()
     .from('profiles')
     .select('*')
     .in('id', ids)
@@ -558,14 +563,14 @@ export async function getBatchStudents(batchId) {
 }
 
 export async function addStudentToBatch(batchId, studentId) {
-  const { error } = await supabase
+  const { error } = await db()
     .from('batch_students')
     .upsert({ batch_id: batchId, student_id: studentId })
   if (error) throw error
 }
 
 export async function removeStudentFromBatch(batchId, studentId) {
-  const { error } = await supabase
+  const { error } = await db()
     .from('batch_students')
     .delete()
     .eq('batch_id', batchId)
@@ -574,7 +579,7 @@ export async function removeStudentFromBatch(batchId, studentId) {
 }
 
 export async function getBatchStudentCounts() {
-  const { data } = await supabase
+  const { data } = await db()
     .from('batch_students')
     .select('batch_id')
   const counts = {}
@@ -601,7 +606,7 @@ function attendanceFromDb(row) {
 }
 
 export async function getAttendanceByStudent(studentId) {
-  const { data } = await supabase
+  const { data } = await db()
     .from('attendance')
     .select('*')
     .eq('student_id', studentId)
@@ -610,7 +615,7 @@ export async function getAttendanceByStudent(studentId) {
 }
 
 export async function getAttendanceByBatchDate(batchId, date) {
-  const { data } = await supabase
+  const { data } = await db()
     .from('attendance')
     .select('*')
     .eq('batch_id', batchId)
@@ -619,7 +624,7 @@ export async function getAttendanceByBatchDate(batchId, date) {
 }
 
 export async function getAttendanceByBatch(batchId) {
-  const { data } = await supabase
+  const { data } = await db()
     .from('attendance')
     .select('*')
     .eq('batch_id', batchId)
@@ -628,7 +633,7 @@ export async function getAttendanceByBatch(batchId) {
 }
 
 export async function upsertAttendance(records) {
-  const { error } = await supabase
+  const { error } = await db()
     .from('attendance')
     .upsert(records, { onConflict: 'batch_id,student_id,date' })
   if (error) throw error
@@ -652,7 +657,7 @@ function sessionFromDb(row) {
 }
 
 export async function getClassSessionsByAcademy(academyId) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('class_sessions')
     .select('*')
     .eq('academy_id', academyId)
@@ -662,7 +667,7 @@ export async function getClassSessionsByAcademy(academyId) {
 }
 
 export async function getClassSessionsByBatch(batchId) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('class_sessions')
     .select('*')
     .eq('batch_id', batchId)
@@ -672,7 +677,7 @@ export async function getClassSessionsByBatch(batchId) {
 }
 
 export async function getClassSessionByBatchDate(batchId, date) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('class_sessions')
     .select('*')
     .eq('batch_id', batchId)
@@ -683,7 +688,7 @@ export async function getClassSessionByBatchDate(batchId, date) {
 }
 
 export async function createClassSession({ batchId, batchName, academyId, date, title, notes, pgnIds, createdBy }) {
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('class_sessions')
     .insert({
       batch_id:   batchId,
@@ -707,7 +712,7 @@ export async function updateClassSession(id, { title, notes, pgnIds, date }) {
   if (notes    !== undefined) patch.notes   = notes
   if (pgnIds   !== undefined) patch.pgn_ids = pgnIds
   if (date     !== undefined) patch.date    = date
-  const { data, error } = await supabase
+  const { data, error } = await db()
     .from('class_sessions')
     .update(patch)
     .eq('id', id)
@@ -718,6 +723,6 @@ export async function updateClassSession(id, { title, notes, pgnIds, date }) {
 }
 
 export async function deleteClassSession(id) {
-  const { error } = await supabase.from('class_sessions').delete().eq('id', id)
+  const { error } = await db().from('class_sessions').delete().eq('id', id)
   if (error) throw error
 }

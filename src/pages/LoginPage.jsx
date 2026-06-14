@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, User, Settings } from "lucide-react";
+import { Eye, EyeOff, User, Settings, AlertTriangle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { supabase } from "../lib/supabase";
 import { cn } from "../lib/utils";
 
 const PIECES = {
@@ -83,6 +84,22 @@ export default function LoginPage() {
 
   const focusStyle = { borderColor: "#e8622c", boxShadow: "0 0 0 3px rgba(232,98,44,0.12)" };
   const blurStyle  = { borderColor: "#e5dfd6", boxShadow: "none" };
+
+  if (!supabase) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#eee8e0" }}>
+        <div className="bg-white rounded-[24px] border-2 border-amber-300 shadow-xl p-10 max-w-md w-full text-center space-y-4">
+          <AlertTriangle size={40} className="text-amber-500 mx-auto" />
+          <h2 className="text-[22px] font-black text-gray-900">Database not configured</h2>
+          <p className="text-[13px] text-gray-500 leading-relaxed">
+            Set <code className="bg-gray-100 px-1.5 py-0.5 rounded font-mono text-[12px]">VITE_SUPABASE_URL</code> and{" "}
+            <code className="bg-gray-100 px-1.5 py-0.5 rounded font-mono text-[12px]">VITE_SUPABASE_ANON_KEY</code> in your
+            deployment environment variables to connect to the database.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#eee8e0" }}>
