@@ -1,10 +1,12 @@
 import { createContext, useContext, useState } from "react";
 import { loginUser, updateProfile } from "../lib/db";
+import { supabase } from "../lib/supabase";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
+    if (!supabase) { localStorage.removeItem("caUser"); return null; }
     try { return JSON.parse(localStorage.getItem("caUser") || "null"); } catch { return null; }
   });
   const [realUser, setRealUser] = useState(() => {
