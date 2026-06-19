@@ -6,6 +6,7 @@ import {
   Plus, BookOpen, ChevronLeft, Trash2, Calendar, User,
   Clock3, Layers3, FileText,
   Clock, Check, X, ArrowRight, ChevronRight, TrendingUp,
+  BarChart2, AlertCircle,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { BOARD_THEMES } from "../lib/boardThemes";
@@ -17,6 +18,7 @@ import {
   getProfiles, getProfilesByAcademy, getAcademies,
   getHomeworkProgress, saveHomeworkPuzzleResult,
   getAllHomeworkProgressForStudent, getFullHomeworkProgressForStudent,
+  getHomeworkProgressForCoach,
 } from "../lib/db";
 
 const inputCls =
@@ -798,6 +800,218 @@ function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
   );
 }
 
+// ── Coach Review Panel ────────────────────────────────────────────────────────
+
+function CoachReviewPanel({ hw, pgns, students, onClose }) {
+  const [rows,    setRows]    = useState([])
+  const [loading, setLoading] = useState(true)
+
+  const totalPuzzles = pgns.find(p => p.id === hw.pgnId)?.puzzleCount || 0
+
+  useEffect(() => {
+    setLoading(true)
+    getHomeworkProgressForCoach(hw.id).then(data => {
+      setRows(data)
+      setLoading(false)
+    })
+  }, [hw.id])
+
+  // Group rows by student_id → per-student summary
+  const byStudent = useMemo(() => {
+    const map = {}
+    rows.forEach(r => {
+      if (!map[r.student_id]) {
+        map[r.student_id] = { studentId: r.student_id, solved: 0, wrongTotal: 0, timeSecs: 0, lastAt: null }
+      }
+      const s = map[r.student_id]
+      if (r.solved) { s.solved++; s.timeSecs += r.time_seconds || 0 }
+      s.wrongTotal += r.wrong_count || 0
+      const d = new Date(r.updated_at)
+      if (!s.lastAt || d > s.lastAt) s.lastAt = d
+    })
+    return Object.values(map)
+  }, [rows])
+
+  // Merge with known student profiles
+  const enriched = useMemo(() => {
+    return byStudent.map(s => {
+      const profile = students.find(p => String(p.id) === String(s.studentId))
+      return { ...s, name: profile?.name || `Student #${s.studentId}`, username: profile?.username || '' }
+    }).sort((a, b) => b.solved - a.solved || a.wrongTotal - b.wrongTotal)
+  }, [byStudent, students])
+
+  // Students who haven't started yet
+  const notStartedStudents = useMemo(() => {
+    const startedIds = new Set(byStudent.map(s => String(s.studentId)))
+    return students.filter(p => p.batchCode === hw.batchName && !startedIds.has(String(p.id)))
+  }, [byStudent, students, hw.batchName])
+
+  // Summary stats
+  const totalAttempted  = enriched.length
+  const avgSolved       = totalAttempted ? (enriched.reduce((a, s) => a + s.solved, 0) / totalAttempted).toFixed(1) : 0
+  const avgWrong        = totalAttempted ? (enriched.reduce((a, s) => a + s.wrongTotal, 0) / totalAttempted).toFixed(1) : 0
+  const completedCount  = enriched.filter(s => s.solved >= totalPuzzles && totalPuzzles > 0).length
+
+  function fmtAgo(d) {
+    if (!d) return ''
+    const diff = Date.now() - d.getTime()
+    const m = Math.floor(diff / 60000)
+    if (m < 1) return 'just now'
+    if (m < 60) return `${m}m ago`
+    const h = Math.floor(m / 60)
+    if (h < 24) return `${h}h ago`
+    return `${Math.floor(h / 24)}d ago`
+  }
+
+  function fmtTime(secs) {
+    if (!secs) return '—'
+    const m = Math.floor(secs / 60)
+    const s = secs % 60
+    return m > 0 ? `${m}m ${s}s` : `${s}s`
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
+
+      {/* Drawer */}
+      <motion.div
+        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', stiffness: 320, damping: 34 }}
+        className="relative w-full max-w-[520px] h-full bg-[#f6f8fc] border-l border-gray-200 shadow-2xl flex flex-col overflow-hidden">
+
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 px-6 py-5 shrink-0">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <span className="text-[11px] font-bold text-brand-600 uppercase tracking-wider">{hw.id}</span>
+              <h2 className="text-[18px] font-black text-gray-900 leading-tight mt-0.5">{hw.title}</h2>
+              <p className="text-[12px] text-gray-400 mt-1">
+                Batch: <strong>{hw.batchName}</strong> · {totalPuzzles} puzzles
+              </p>
+            </div>
+            <button onClick={onClose}
+              className="w-9 h-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-400 hover:bg-gray-50 shrink-0 transition-colors">
+              <X size={15} />
+            </button>
+          </div>
+
+          {/* Summary pills */}
+          <div className="grid grid-cols-4 gap-2 mt-4">
+            {[
+              { label: 'Attempted', value: totalAttempted, color: 'text-brand-600' },
+              { label: 'Completed', value: completedCount, color: 'text-emerald-600' },
+              { label: 'Avg Solved', value: `${avgSolved}/${totalPuzzles}`, color: 'text-gray-800' },
+              { label: 'Avg Wrong', value: avgWrong, color: 'text-red-500' },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5 text-center">
+                <p className={cn('text-[18px] font-black leading-none', color)}>{value}</p>
+                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mt-1">{label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Student list */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+
+          {loading && (
+            <div className="flex items-center justify-center py-16">
+              <span className="w-6 h-6 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
+            </div>
+          )}
+
+          {!loading && enriched.length === 0 && notStartedStudents.length === 0 && (
+            <div className="flex flex-col items-center py-16 text-center">
+              <AlertCircle size={32} className="text-gray-300 mb-3" />
+              <p className="text-[14px] font-bold text-gray-500">No student data yet</p>
+              <p className="text-[12px] text-gray-400 mt-1">Students haven't started this homework.</p>
+            </div>
+          )}
+
+          {/* Students who have attempted */}
+          {enriched.length > 0 && (
+            <>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 px-1">Attempted</p>
+              {enriched.map((s, i) => {
+                const pct        = totalPuzzles ? Math.round((s.solved / totalPuzzles) * 100) : 0
+                const completed  = s.solved >= totalPuzzles && totalPuzzles > 0
+                const accuracy   = s.solved + s.wrongTotal > 0
+                  ? Math.round((s.solved / (s.solved + s.wrongTotal)) * 100) : null
+
+                return (
+                  <motion.div key={s.studentId}
+                    initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
+                    className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                    <div className="flex items-start gap-3">
+                      {/* Avatar */}
+                      <div className={cn('w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-black shrink-0',
+                        completed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600')}>
+                        {s.name[0]?.toUpperCase()}
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[13px] font-bold text-gray-900 truncate">{s.name}</p>
+                          {completed
+                            ? <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full shrink-0">
+                                <Check size={9} strokeWidth={3} /> Done
+                              </span>
+                            : <span className="text-[10px] text-gray-400 shrink-0">{fmtAgo(s.lastAt)}</span>
+                          }
+                        </div>
+
+                        {/* Progress bar */}
+                        <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all duration-500"
+                            style={{ width: `${pct}%`, background: completed ? '#22c55e' : '#f97316' }} />
+                        </div>
+
+                        {/* Stats row */}
+                        <div className="flex items-center gap-4 mt-2">
+                          <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
+                            <Check size={10} strokeWidth={3} /> {s.solved}/{totalPuzzles} correct
+                          </span>
+                          <span className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
+                            <X size={10} strokeWidth={3} /> {s.wrongTotal} wrong
+                          </span>
+                          {accuracy !== null && (
+                            <span className="text-[11px] text-gray-400">{accuracy}% acc.</span>
+                          )}
+                          <span className="text-[11px] text-gray-400 ml-auto">{fmtTime(s.timeSecs)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )
+              })}
+            </>
+          )}
+
+          {/* Students who haven't started */}
+          {notStartedStudents.length > 0 && (
+            <>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 px-1 mt-2">Not Started</p>
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50">
+                {notStartedStudents.map(s => (
+                  <div key={s.id} className="flex items-center gap-3 px-4 py-3">
+                    <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center text-[12px] font-bold shrink-0">
+                      {s.name[0]?.toUpperCase()}
+                    </div>
+                    <p className="text-[12px] text-gray-500 flex-1">{s.name}</p>
+                    <span className="text-[10px] text-gray-400 bg-gray-50 border border-gray-100 rounded-lg px-2 py-0.5">0/{totalPuzzles}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 // ── Main HomeworkPage ─────────────────────────────────────────────────────────
 
 export default function HomeworkPage() {
@@ -816,6 +1030,8 @@ export default function HomeworkPage() {
   const [allProgress, setAllProgress]  = useState([]);
   // bump this to re-fetch progress after returning from the player
   const [progressKey, setProgressKey] = useState(0);
+  // coach review panel
+  const [reviewHw,    setReviewHw]    = useState(null);
 
   useEffect(() => {
     async function load() {
@@ -987,6 +1203,16 @@ export default function HomeworkPage() {
   // ── List view (coach / admin) ────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#f6f8fc]">
+      <AnimatePresence>
+        {reviewHw && (
+          <CoachReviewPanel
+            hw={reviewHw}
+            pgns={pgns}
+            students={students}
+            onClose={() => setReviewHw(null)}
+          />
+        )}
+      </AnimatePresence>
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
 
         <div className="flex justify-end mb-6">
@@ -1039,10 +1265,16 @@ export default function HomeworkPage() {
                     <h3 className="text-[18px] font-black text-gray-900 leading-tight truncate">{hw.title}</h3>
                   </div>
                   {user?.role !== "student" && (
-                    <button onClick={e => { e.stopPropagation(); handleDelete(hw.id); }}
-                      className="opacity-0 group-hover:opacity-100 w-10 h-10 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all shrink-0">
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                      <button onClick={e => { e.stopPropagation(); setReviewHw(hw); }}
+                        className="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-brand-50 text-brand-600 text-[12px] font-bold hover:bg-brand-100 transition-colors">
+                        <BarChart2 size={13} /> Review
+                      </button>
+                      <button onClick={e => { e.stopPropagation(); handleDelete(hw.id); }}
+                        className="w-9 h-9 rounded-xl bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   )}
                 </div>
 

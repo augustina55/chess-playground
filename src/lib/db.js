@@ -362,6 +362,16 @@ export async function getAllHomeworkProgressForStudent(studentId, homeworkIds) {
   return data || []
 }
 
+// All students' progress for a single homework (coach review)
+export async function getHomeworkProgressForCoach(hwId) {
+  const { data, error } = await db()
+    .from('homework_progress')
+    .select('student_id, puzzle_id, solved, wrong_count, time_seconds, updated_at')
+    .eq('homework_id', hwId)
+  if (error) { console.error('[coach review]', error.message); return [] }
+  return data || []
+}
+
 export async function saveHomeworkPuzzleResult(homeworkId, studentId, puzzleId, { solved, wrongCount, timeSeconds }) {
   const { error } = await db()
     .from('homework_progress')
