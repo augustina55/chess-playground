@@ -316,21 +316,21 @@ function GameOverModal({ result, reason, onRematch, onExit }) {
   )
 }
 
-// ── Icon control button with tooltip ─────────────────────────────────────────
+// ── Control button with tooltip ───────────────────────────────────────────────
 
 function CtrlBtn({ icon: Icon, label, onClick, danger }) {
   return (
     <div className="relative group">
       <button onClick={onClick}
         className={cn(
-          'w-12 h-12 rounded-xl border-2 flex items-center justify-center transition-all',
+          'w-11 h-11 rounded-xl border-2 flex items-center justify-center transition-all',
           danger
-            ? 'border-red-800 text-red-400 hover:bg-red-900/40 hover:text-red-300'
-            : 'border-[#3a3a5c] text-gray-400 hover:bg-white/10 hover:text-gray-200'
+            ? 'border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300'
+            : 'border-gray-200 text-gray-500 hover:bg-gray-100 hover:border-gray-300 hover:text-gray-700'
         )}>
-        <Icon size={18} />
+        <Icon size={17} />
       </button>
-      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1 bg-gray-900 border border-gray-700 text-white text-[11px] font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-20 shadow-xl">
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1 bg-gray-900 text-white text-[11px] font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-20">
         {label}
         <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
       </div>
@@ -341,17 +341,17 @@ function CtrlBtn({ icon: Icon, label, onClick, danger }) {
 // ── Timer box ─────────────────────────────────────────────────────────────────
 
 function TimerBox({ secs, active }) {
-  const low = secs <= 10 && active
+  const low = active && secs <= 10
   return (
     <div className={cn(
-      'flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all min-w-[110px] justify-center',
+      'flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 min-w-[96px] justify-center transition-all',
       active
         ? low ? 'bg-red-500 border-red-400 text-white animate-pulse'
-               : 'bg-[#1a1a2e] border-brand-500 text-white shadow-[0_0_12px_rgba(249,115,22,0.3)]'
-        : 'bg-[#1e1e38] border-[#2a2a4a] text-gray-500'
+               : 'bg-gray-900 border-gray-900 text-white shadow-[0_3px_0_#1a140f]'
+        : 'bg-gray-50 border-gray-200 text-gray-400'
     )}>
-      <Clock size={12} className={active ? (low ? 'text-white/80' : 'text-brand-400') : 'text-gray-600'} />
-      <span className="text-[20px] font-black tabular-nums leading-none">{fmtTime(secs)}</span>
+      <Clock size={11} className={active && !low ? 'text-brand-400' : ''} />
+      <span className="text-[17px] font-black tabular-nums leading-none">{fmtTime(secs)}</span>
     </div>
   )
 }
@@ -359,23 +359,39 @@ function TimerBox({ secs, active }) {
 // ── Game screen ───────────────────────────────────────────────────────────────
 
 function GameScreen({ mode, tc, opponent, onExit }) {
-  const { user }   = useAuth()
-  const chessRef   = useRef(new Chess())
-  const [fen, setFen]         = useState(chessRef.current.fen())
-  const [history, setHistory] = useState([])
-  const [wTime, setWTime]     = useState(tc.m * 60)
-  const [bTime, setBTime]     = useState(tc.m * 60)
+  const { user }           = useAuth()
+  const chessRef           = useRef(new Chess())
+  const boardContainerRef  = useRef(null)
+  const moveListRef        = useRef(null)
+
+  const [fen,      setFen]      = useState(chessRef.current.fen())
+  const [history,  setHistory]  = useState([])
+  const [wTime,    setWTime]    = useState(tc.m * 60)
+  const [bTime,    setBTime]    = useState(tc.m * 60)
   const [gameOver, setGameOver] = useState(null)
   const [drawSent, setDrawSent] = useState(false)
-  const orientation = 'white'
-  const moveListRef = useRef()
+  const [boardSize, setBoardSize] = useState(400)
 
-  // Scroll move list to bottom on new move
+  const orientation = 'white'
+
+  // Auto-size board to fit container
+  useEffect(() => {
+    const el = boardContainerRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect
+      setBoardSize(Math.floor(Math.min(width, height)) - 2)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Scroll notation to bottom on new move
   useEffect(() => {
     if (moveListRef.current) moveListRef.current.scrollTop = moveListRef.current.scrollHeight
   }, [history])
 
-  const chess = chessRef.current
+  const chess       = chessRef.current
   const isWhiteTurn = chess.turn() === 'w'
 
   function detectGameOver() {
@@ -385,8 +401,8 @@ function GameScreen({ mode, tc, opponent, onExit }) {
       const playerLost = (orientation === 'white' && loser === 'w') || (orientation === 'black' && loser === 'b')
       return { result: playerLost ? 'loss' : 'win', reason: 'Checkmate' }
     }
-    if (g.isStalemate())           return { result: 'draw', reason: 'Stalemate' }
-    if (g.isThreefoldRepetition()) return { result: 'draw', reason: 'Threefold Repetition' }
+    if (g.isStalemate())            return { result: 'draw', reason: 'Stalemate' }
+    if (g.isThreefoldRepetition())  return { result: 'draw', reason: 'Threefold Repetition' }
     if (g.isInsufficientMaterial()) return { result: 'draw', reason: 'Insufficient Material' }
     if (g.isDraw())                 return { result: 'draw', reason: 'Draw by 50-move rule' }
     return null
@@ -398,48 +414,38 @@ function GameScreen({ mode, tc, opponent, onExit }) {
     const moves = g.moves({ verbose: true })
     if (!moves.length) return
     setTimeout(() => {
-      const m = moves[Math.floor(Math.random() * moves.length)]
-      g.move(m)
+      g.move(moves[Math.floor(Math.random() * moves.length)])
       setFen(g.fen())
       setHistory(g.history({ verbose: true }))
       setBTime(t => t + tc.i)
       const over = detectGameOver()
       if (over) setGameOver(over)
     }, 300 + Math.random() * 700)
-  }, [gameOver, tc.i])
+  }, [gameOver, tc.i]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Timer
+  // Countdown timer
   useEffect(() => {
     if (gameOver) return
     const id = setInterval(() => {
       if (isWhiteTurn) {
-        setWTime(t => {
-          if (t <= 1) { setGameOver({ result: orientation === 'white' ? 'loss' : 'win', reason: 'Out of time' }); return 0 }
-          return t - 1
-        })
+        setWTime(t => { if (t <= 1) { setGameOver({ result: 'loss', reason: 'Out of time' }); return 0 } return t - 1 })
       } else {
-        setBTime(t => {
-          if (t <= 1) { setGameOver({ result: orientation === 'white' ? 'win' : 'loss', reason: 'Opponent out of time' }); return 0 }
-          return t - 1
-        })
+        setBTime(t => { if (t <= 1) { setGameOver({ result: 'win', reason: 'Opponent out of time' }); return 0 } return t - 1 })
       }
     }, 1000)
     return () => clearInterval(id)
-  }, [isWhiteTurn, gameOver, orientation])
+  }, [isWhiteTurn, gameOver])
 
   function onDrop(src, tgt) {
     if (gameOver) return false
-    const isMyTurn = orientation === 'white' ? isWhiteTurn : !isWhiteTurn
-    if (!isMyTurn) return false
+    if (!(orientation === 'white' ? isWhiteTurn : !isWhiteTurn)) return false
     const g = chessRef.current
     let mv
-    try { mv = g.move({ from: src, to: tgt, promotion: 'q' }) }
-    catch { return false }
+    try { mv = g.move({ from: src, to: tgt, promotion: 'q' }) } catch { return false }
     if (!mv) return false
     setFen(g.fen())
     setHistory(g.history({ verbose: true }))
-    if (orientation === 'white') setWTime(t => t + tc.i)
-    else setBTime(t => t + tc.i)
+    if (orientation === 'white') setWTime(t => t + tc.i); else setBTime(t => t + tc.i)
     const over = detectGameOver()
     if (over) { setGameOver(over); return true }
     if (mode === 'ai') aiMove()
@@ -448,184 +454,168 @@ function GameScreen({ mode, tc, opponent, onExit }) {
 
   function takeback() {
     const g = chessRef.current
-    g.undo()
-    if (mode === 'ai') g.undo()
-    setFen(g.fen())
-    setHistory(g.history({ verbose: true }))
+    g.undo(); if (mode === 'ai') g.undo()
+    setFen(g.fen()); setHistory(g.history({ verbose: true }))
   }
-
-  function resign() { setGameOver({ result: 'loss', reason: 'You resigned' }) }
-
+  function resign()    { setGameOver({ result: 'loss', reason: 'You resigned' }) }
   function offerDraw() {
     setDrawSent(true)
-    if (mode === 'ai') {
-      setTimeout(() => {
-        if (Math.random() > 0.55) setGameOver({ result: 'draw', reason: 'Draw agreed' })
-        else setDrawSent(false)
-      }, 1800)
-    }
+    if (mode === 'ai') setTimeout(() => {
+      if (Math.random() > 0.55) setGameOver({ result: 'draw', reason: 'Draw agreed' })
+      else setDrawSent(false)
+    }, 1800)
   }
-
   function rematch() {
     chessRef.current = new Chess()
-    setFen(chessRef.current.fen())
-    setHistory([])
-    setWTime(tc.m * 60)
-    setBTime(tc.m * 60)
-    setGameOver(null)
-    setDrawSent(false)
+    setFen(chessRef.current.fen()); setHistory([])
+    setWTime(tc.m * 60); setBTime(tc.m * 60)
+    setGameOver(null); setDrawSent(false)
   }
 
-  // Board orientation helpers
-  const topName    = orientation === 'white' ? (opponent?.name || 'Opponent') : (user?.name || 'You')
-  const topRating  = orientation === 'white' ? (opponent?.rating || '—')       : (user?.rating || '—')
-  const topIsWhite = orientation !== 'white'
-  const topTime    = topIsWhite ? wTime : bTime
-  const topActive  = topIsWhite ? isWhiteTurn : !isWhiteTurn
+  // Player helpers
+  const topName    = opponent?.name || 'Opponent'
+  const topRating  = opponent?.rating
+  const topIsWhite = false
+  const topTime    = bTime
+  const topActive  = !isWhiteTurn
 
-  const btmName    = orientation === 'white' ? (user?.name || 'You')            : (opponent?.name || 'Opponent')
-  const btmRating  = orientation === 'white' ? (user?.rating || '—')             : (opponent?.rating || '—')
-  const btmIsWhite = orientation === 'white'
-  const btmTime    = btmIsWhite ? wTime : bTime
-  const btmActive  = btmIsWhite ? isWhiteTurn : !isWhiteTurn
+  const btmName    = user?.name || 'You'
+  const btmRating  = user?.rating
+  const btmIsWhite = true
+  const btmTime    = wTime
+  const btmActive  = isWhiteTurn
 
-  // Move pairs for notation
   const pairs = useMemo(() => {
     const p = []
     for (let i = 0; i < history.length; i += 2)
-      p.push({ n: Math.floor(i / 2) + 1, w: history[i], b: history[i + 1] })
+      p.push({ n: i / 2 + 1, w: history[i], b: history[i + 1] })
     return p
   }, [history])
 
-  const BOARD_SIZE = 480
+  function Avatar({ name, isWhite }) {
+    return (
+      <div className={cn(
+        'w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-black border-2 shrink-0',
+        isWhite ? 'bg-white text-gray-800 border-gray-300 shadow-sm' : 'bg-[#1a140f] text-white border-gray-700'
+      )}>
+        {name[0]?.toUpperCase()}
+      </div>
+    )
+  }
+
+  function PlayerRow({ name, rating, isWhite, time, active }) {
+    return (
+      <div className={cn(
+        'flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl border-2 transition-all bg-white',
+        active ? 'border-[#1a140f] shadow-[0_3px_0_#1a140f]' : 'border-gray-200'
+      )}>
+        <div className="flex items-center gap-2.5">
+          <Avatar name={name} isWhite={isWhite} />
+          <div>
+            <p className="text-[13px] font-bold text-gray-900 leading-none">{name}</p>
+            {rating && <p className="text-[11px] text-gray-400 mt-0.5">{rating}</p>}
+          </div>
+        </div>
+        <TimerBox secs={time} active={active} />
+      </div>
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-[#13132b] flex items-center justify-center p-4">
-      <div className="flex gap-4 items-center w-full max-w-[900px]">
+    // h-full fills the <main> flex-1 area; overflow-hidden prevents any page scroll
+    <div className="h-full flex overflow-hidden bg-[#f6f8fc]">
 
-        {/* ── Board column ── */}
-        <div className="flex flex-col gap-2.5" style={{ width: BOARD_SIZE }}>
+      {/* ── Board column ── */}
+      <div className="flex-1 flex flex-col gap-2 p-4 min-w-0 overflow-hidden">
 
-          {/* Top player */}
-          <div className="flex items-center justify-between gap-3 bg-[#1e1e38] rounded-2xl px-4 py-3 border border-[#2a2a4a]">
-            <div className="flex items-center gap-3">
-              <div className={cn('w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-black shrink-0 border-2',
-                topIsWhite ? 'bg-gray-100 text-gray-800 border-gray-300' : 'bg-gray-900 text-white border-gray-700')}>
-                {topName[0]?.toUpperCase()}
-              </div>
-              <div>
-                <p className="text-[13px] font-bold text-white leading-none">{topName}</p>
-                <p className="text-[11px] text-gray-500 mt-0.5">{topRating}</p>
-              </div>
-            </div>
-            <TimerBox secs={topTime} active={topActive} />
-          </div>
+        <PlayerRow name={topName} rating={topRating} isWhite={topIsWhite} time={topTime} active={topActive} />
 
-          {/* Board */}
-          <div className="rounded-2xl overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.6)] border border-[#2a2a4a]">
+        {/* Board container — fills remaining height, board auto-sizes inside */}
+        <div ref={boardContainerRef} className="flex-1 min-h-0 flex items-center justify-center">
+          <div className="rounded-2xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.12)] border-2 border-[#1a140f]"
+            style={{ width: boardSize, height: boardSize }}>
             <Chessboard
               position={fen}
               onPieceDrop={onDrop}
               boardOrientation={orientation}
-              boardWidth={BOARD_SIZE}
+              boardWidth={boardSize}
               customBoardStyle={{ borderRadius: 0 }}
               customDarkSquareStyle={{ backgroundColor: '#b58863' }}
               customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
               animationDuration={150}
             />
           </div>
-
-          {/* Bottom player */}
-          <div className="flex items-center justify-between gap-3 bg-[#1e1e38] rounded-2xl px-4 py-3 border border-[#2a2a4a]">
-            <div className="flex items-center gap-3">
-              <div className={cn('w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-black shrink-0 border-2',
-                btmIsWhite ? 'bg-gray-100 text-gray-800 border-gray-300' : 'bg-gray-900 text-white border-gray-700')}>
-                {btmName[0]?.toUpperCase()}
-              </div>
-              <div>
-                <p className="text-[13px] font-bold text-white leading-none">{btmName}</p>
-                <p className="text-[11px] text-gray-500 mt-0.5">{btmRating}</p>
-              </div>
-            </div>
-            <TimerBox secs={btmTime} active={btmActive} />
-          </div>
         </div>
 
-        {/* ── Right panel ── */}
-        <div className="flex-1 flex flex-col gap-3" style={{ height: BOARD_SIZE + 128 }}>
+        <PlayerRow name={btmName} rating={btmRating} isWhite={btmIsWhite} time={btmTime} active={btmActive} />
+      </div>
 
-          {/* Game info bar */}
-          <div className="bg-[#1e1e38] rounded-2xl px-4 py-3 flex items-center justify-between border border-[#2a2a4a]">
-            <div className="flex items-center gap-2">
-              <span className="text-[13px] font-bold text-gray-300">{tcLabel(tc)}</span>
-              <span className="text-[11px] text-gray-600">·</span>
-              <span className="text-[11px] text-gray-500">
-                {mode === 'ai' ? 'vs Computer' : mode === 'friend' ? 'Friend Game' : 'Online'}
-              </span>
-            </div>
-            <button onClick={onExit}
-              className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-gray-200 transition-colors">
-              <X size={14} />
-            </button>
+      {/* ── Right panel — fixed 260px, full height ── */}
+      <div className="w-[260px] shrink-0 border-l-2 border-[#1a140f] bg-white flex flex-col overflow-hidden">
+
+        {/* Header */}
+        <div className="shrink-0 px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Clock size={13} className="text-gray-400" />
+            <span className="text-[13px] font-bold text-gray-800">{tcLabel(tc)}</span>
+            <span className="text-[11px] text-gray-400">
+              · {mode === 'ai' ? 'vs AI' : mode === 'friend' ? 'Friend' : 'Online'}
+            </span>
           </div>
+          <button onClick={onExit}
+            className="w-8 h-8 rounded-xl hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors">
+            <X size={14} />
+          </button>
+        </div>
 
-          {/* Move notation */}
-          <div className="flex-1 bg-[#1e1e38] rounded-2xl border border-[#2a2a4a] flex flex-col overflow-hidden min-h-0">
-            <div className="px-4 py-3 border-b border-[#2a2a4a] shrink-0 flex items-center justify-between">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Moves</p>
-              {history.length > 0 && (
-                <span className="text-[10px] text-gray-600">{Math.ceil(history.length / 2)} moves</span>
-              )}
-            </div>
-            <div ref={moveListRef} className="flex-1 overflow-y-auto min-h-0 py-2">
-              {pairs.length === 0 ? (
-                <p className="text-center py-8 text-[12px] text-gray-600">Make your first move!</p>
-              ) : (
-                <table className="w-full">
-                  <tbody>
-                    {pairs.map(({ n, w, b }) => (
-                      <tr key={n} className="hover:bg-white/5 transition-colors">
-                        <td className="pl-4 pr-2 py-1.5 text-[11px] text-gray-600 font-mono w-8 shrink-0">{n}.</td>
-                        <td className="px-2 py-1.5 text-[13px] font-semibold text-gray-200 cursor-pointer rounded hover:bg-white/10">{w?.san}</td>
-                        <td className="px-2 py-1.5 text-[13px] font-semibold text-gray-200 cursor-pointer rounded hover:bg-white/10">{b?.san || ''}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+        {/* Move notation — only this scrolls */}
+        <div className="shrink-0 px-4 pt-3 pb-1 flex items-center justify-between">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Moves</p>
+          {history.length > 0 && <span className="text-[10px] text-gray-400">{Math.ceil(history.length / 2)}</span>}
+        </div>
+        <div ref={moveListRef} className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
+          {pairs.length === 0 ? (
+            <p className="text-center py-10 text-[12px] text-gray-400">Make your first move!</p>
+          ) : (
+            <table className="w-full">
+              <tbody>
+                {pairs.map(({ n, w, b }) => (
+                  <tr key={n} className="hover:bg-gray-50 transition-colors rounded">
+                    <td className="pl-3 pr-1 py-1.5 text-[11px] text-gray-400 font-mono w-7">{n}.</td>
+                    <td className="px-1 py-1.5 text-[13px] font-semibold text-gray-800 cursor-pointer rounded">{w?.san}</td>
+                    <td className="px-1 py-1.5 text-[13px] font-semibold text-gray-800 cursor-pointer rounded">{b?.san || ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Controls — fixed at bottom */}
+        <div className="shrink-0 border-t border-gray-100 px-4 py-4">
+          <div className="flex items-center justify-center gap-3">
+            <CtrlBtn icon={RotateCcw} label="Take Back"  onClick={takeback} />
+            <CtrlBtn icon={Handshake} label="Offer Draw" onClick={offerDraw} />
+            <CtrlBtn icon={Flag}      label="Resign"      onClick={resign} danger />
           </div>
-
-          {/* Controls */}
-          <div className="bg-[#1e1e38] rounded-2xl border border-[#2a2a4a] px-4 py-4">
-            <div className="flex items-center justify-center gap-4">
-              <CtrlBtn icon={RotateCcw}  label="Take Back"  onClick={takeback} />
-              <CtrlBtn icon={Handshake}  label="Offer Draw" onClick={offerDraw} />
-              <CtrlBtn icon={Flag}       label="Resign"     onClick={resign} danger />
-            </div>
-
-            {/* Draw offer banner */}
-            <AnimatePresence>
-              {drawSent && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                  className="mt-3 overflow-hidden">
-                  <div className="flex items-center justify-between bg-amber-900/30 border border-amber-700/40 rounded-xl px-3 py-2.5">
-                    <div className="flex items-center gap-2 text-amber-300 text-[12px] font-semibold">
-                      <Handshake size={13} />
-                      Draw offer sent…
-                    </div>
-                    <button onClick={() => setDrawSent(false)} className="text-amber-500 hover:text-amber-300 transition-colors">
-                      <X size={13} />
-                    </button>
+          <AnimatePresence>
+            {drawSent && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }} className="mt-3 overflow-hidden">
+                <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                  <div className="flex items-center gap-2 text-amber-700 text-[11px] font-semibold">
+                    <Handshake size={12} /> Draw offer sent…
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                  <button onClick={() => setDrawSent(false)} className="text-amber-500 hover:text-amber-700">
+                    <X size={12} />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
-      {/* Game over */}
       <AnimatePresence>
         {gameOver && (
           <GameOverModal result={gameOver.result} reason={gameOver.reason} onRematch={rematch} onExit={onExit} />
