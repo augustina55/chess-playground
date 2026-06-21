@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Chessboard } from "react-chessboard";
 import { Chess } from "chess.js";
-import { RotateCcw, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Cpu, Edit3, Copy, Check } from "lucide-react";
+import {
+  RotateCcw, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight,
+  ChevronDown, ChevronUp, Cpu, Edit3, Copy, Check,
+} from "lucide-react";
 import { cn } from "../lib/utils";
 import { BOARD_THEMES } from "../lib/boardThemes";
 import { useAuth } from "../context/AuthContext";
@@ -36,7 +39,6 @@ function fenToPositionObj(fen) {
   return pos;
 }
 
-// UCI moves array → SAN array using chess.js
 function uciToSan(fen, uciMoves) {
   const san = [];
   let g;
@@ -51,7 +53,6 @@ function uciToSan(fen, uciMoves) {
   return san;
 }
 
-// SAN array → formatted string with move numbers ("1. e4 e5 2. Nf3")
 function formatPv(fen, pvSan) {
   if (!pvSan || pvSan.length === 0) return "";
   const parts = fen.split(" ");
@@ -99,7 +100,6 @@ function useEngine(enabled, fen, targetDepth, multiPV) {
   const mapRef = useRef({});
   const timer  = useRef(null);
 
-  // Worker lifecycle — recreate when enabled toggles
   useEffect(() => {
     if (!enabled) {
       wRef.current?.terminate(); wRef.current = null;
@@ -139,7 +139,6 @@ function useEngine(enabled, fen, targetDepth, multiPV) {
     return () => { w.terminate(); wRef.current = null; setReady(false); setVariations([]); setCurrentDepth(0); };
   }, [enabled]);
 
-  // Re-analyze on fen / depth / multiPV change
   useEffect(() => {
     if (!ready || !wRef.current) return;
     clearTimeout(timer.current);
@@ -179,44 +178,44 @@ export default function AnalysePage() {
   const [posIdx,    setPosIdx]    = useState(0);
   const currentFen = positions[posIdx].fen;
 
-  const [boardFlipped, setBoardFlipped] = useState(false);
+  const [boardFlipped,  setBoardFlipped]  = useState(false);
 
   // Engine
-  const [engineOn,    setEngineOn]    = useState(false);
-  const [engineDepth, setEngineDepth] = useState(18);
-  const [multiPV,     setMultiPV]     = useState(1);
+  const [engineOn,     setEngineOn]     = useState(false);
+  const [engineDepth,  setEngineDepth]  = useState(15);
+  const [multiPV,      setMultiPV]      = useState(1);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [expandedVars, setExpandedVars] = useState(new Set());
   const { variations, currentDepth, ready } = useEngine(engineOn, currentFen, engineDepth, multiPV);
 
   // Edit position
-  const [editMode,   setEditMode]   = useState(false);
-  const [editPos,    setEditPos]    = useState({});
-  const [selPiece,   setSelPiece]   = useState("wP");
-  const [eraserOn,   setEraserOn]   = useState(false);
-  const [editTurn,   setEditTurn]   = useState("w");
+  const [editMode,  setEditMode]  = useState(false);
+  const [editPos,   setEditPos]   = useState({});
+  const [selPiece,  setSelPiece]  = useState("wP");
+  const [eraserOn,  setEraserOn]  = useState(false);
+  const [editTurn,  setEditTurn]  = useState("w");
 
   // FEN
-  const [fenInput,   setFenInput]   = useState(START_FEN);
-  const [fenCopied,  setFenCopied]  = useState(false);
-  const [fenError,   setFenError]   = useState("");
+  const [fenInput,  setFenInput]  = useState(START_FEN);
+  const [fenCopied, setFenCopied] = useState(false);
+  const [fenError,  setFenError]  = useState("");
 
   const notationRef = useRef(null);
 
   useEffect(() => { setFenInput(currentFen); }, [currentFen]);
 
-  // Keyboard navigation
   useEffect(() => {
     function onKey(e) {
       if (editMode || e.target.tagName === "INPUT") return;
-      if (e.key === "ArrowLeft")  { setPosIdx(i => Math.max(0, i - 1));                      e.preventDefault(); }
-      if (e.key === "ArrowRight") { setPosIdx(i => Math.min(positions.length - 1, i + 1));    e.preventDefault(); }
-      if (e.key === "ArrowUp")    { setPosIdx(0);                                              e.preventDefault(); }
-      if (e.key === "ArrowDown")  { setPosIdx(positions.length - 1);                          e.preventDefault(); }
+      if (e.key === "ArrowLeft")  { setPosIdx(i => Math.max(0, i - 1));                     e.preventDefault(); }
+      if (e.key === "ArrowRight") { setPosIdx(i => Math.min(positions.length - 1, i + 1));   e.preventDefault(); }
+      if (e.key === "ArrowUp")    { setPosIdx(0);                                             e.preventDefault(); }
+      if (e.key === "ArrowDown")  { setPosIdx(positions.length - 1);                         e.preventDefault(); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [positions.length, editMode]);
 
-  // Scroll active move into view
   useEffect(() => {
     notationRef.current?.querySelector("[data-active='true']")?.scrollIntoView({ block: "nearest" });
   }, [posIdx]);
@@ -226,7 +225,6 @@ export default function AnalysePage() {
     setPosIdx(i => i + 1);
   }
 
-  // Both-sides move (v5 API)
   function handlePieceDrop({ sourceSquare, targetSquare }) {
     for (const fenToTry of [currentFen, flipTurn(currentFen)]) {
       let g;
@@ -238,7 +236,14 @@ export default function AnalysePage() {
     return false;
   }
 
-  // Engine arrows — top 3 variations
+  function toggleVar(line) {
+    setExpandedVars(prev => {
+      const n = new Set(prev);
+      n.has(line) ? n.delete(line) : n.add(line);
+      return n;
+    });
+  }
+
   const engineArrows = useMemo(() => {
     if (!engineOn || !ready || !variations.length) return [];
     return variations.slice(0, 3).map((v, i) => {
@@ -248,7 +253,6 @@ export default function AnalysePage() {
     }).filter(Boolean);
   }, [variations, engineOn, ready]);
 
-  // Convert UCI pv → SAN for each variation
   const variationsSan = useMemo(() =>
     variations.map(v => ({ ...v, pvSan: uciToSan(currentFen, v.pv) })),
     [variations, currentFen]
@@ -256,7 +260,7 @@ export default function AnalysePage() {
 
   const topVar = variationsSan[0];
 
-  // Eval bar % (white's share)
+  // White's share of eval bar (0–100)
   const evalPct = useMemo(() => {
     if (!topVar) return 50;
     if (topVar.isMate) return topVar.mateIn > 0 ? 100 : 0;
@@ -305,8 +309,9 @@ export default function AnalysePage() {
     } catch { setFenError("Invalid position — check kings"); }
   }
 
-  const moves = positions.slice(1);
+  const moves    = positions.slice(1);
   const depthPct = ((engineDepth - 5) / 25) * 100;
+  const showEval = engineOn && variationsSan.length > 0;
 
   const squareColors = {
     darkSquareStyle:  { backgroundColor: boardTheme.dark },
@@ -345,7 +350,7 @@ export default function AnalysePage() {
       {/* ── Left: toolbar + board ── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
-        {/* Toolbar — flip + nav only */}
+        {/* Toolbar */}
         <div className="shrink-0 flex items-center gap-2 px-4 py-2 border-b-2 border-[#1a140f] bg-white">
           <button onClick={() => setBoardFlipped(f => !f)} title="Flip board"
             className="h-8 w-8 flex items-center justify-center rounded-xl border-2 border-[#1a140f] bg-[#f0e8df] hover:bg-[#e8dcd0] text-[#1a140f] shadow-[0_3px_0_#1a140f] active:shadow-none active:translate-y-[2px] transition-all">
@@ -359,9 +364,20 @@ export default function AnalysePage() {
           </div>
         </div>
 
-        {/* Board — same sizing as BlitzRacePage */}
-        <div className="flex-1 flex items-center justify-center min-w-0 overflow-hidden p-4">
-          <div style={{ width: "min(calc(100% - 8px), calc(100vh - 165px))", maxWidth: "min(calc(100% - 8px), calc(100vh - 165px))" }}>
+        {/* Board — vertical eval bar left, board right */}
+        <div className="flex-1 flex items-center justify-center min-w-0 overflow-hidden py-4 pl-8 pr-4">
+          <div className="relative" style={{ width: "min(calc(100% - 8px), calc(100vh - 165px))" }}>
+
+            {/* Vertical eval bar (absolute, left of board) */}
+            {showEval && (
+              <div className="absolute top-0 bottom-0 -left-6 w-4 rounded-full overflow-hidden flex flex-col bg-gray-900">
+                {/* Black section — top */}
+                <div className="bg-gray-900 transition-all duration-700" style={{ flex: 100 - evalPct }} />
+                {/* White section — bottom */}
+                <div className="bg-gray-100 transition-all duration-700" style={{ flex: evalPct }} />
+              </div>
+            )}
+
             <div className="overflow-hidden rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
               <Chessboard options={editMode ? editOpts : mainOpts} />
             </div>
@@ -372,94 +388,101 @@ export default function AnalysePage() {
       {/* ── Right panel ── */}
       <div className="w-[272px] shrink-0 border-l-2 border-[#1a140f] bg-white flex flex-col overflow-hidden">
 
-        {/* Engine section */}
-        <div className="shrink-0 p-3 space-y-2.5 border-b border-gray-100">
+        {/* Engine — toggle + collapsible settings */}
+        <div className="shrink-0 border-b border-gray-100">
 
-          {/* Toggle row */}
-          <div className="flex items-center justify-between">
+          {/* Header row (always visible) */}
+          <div className="flex items-center justify-between px-3 py-2.5">
             <div className="flex items-center gap-2">
               <Cpu size={14} className="text-gray-500" />
               <span className="text-[12px] font-bold text-gray-700">Stockfish</span>
               {engineOn && ready  && <span className="text-[9px] font-black bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">ON</span>}
               {engineOn && !ready && <span className="text-[9px] font-black bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full animate-pulse">LOADING</span>}
             </div>
-            <button onClick={() => setEngineOn(e => !e)}
-              className={cn("relative w-10 h-5 rounded-full transition-colors duration-200", engineOn ? "bg-green-500" : "bg-gray-300")}>
-              <span className={cn("absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-200", engineOn ? "left-5" : "left-0.5")} />
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Settings collapse toggle */}
+              {engineOn && (
+                <button onClick={() => setSettingsOpen(o => !o)}
+                  className="flex items-center gap-1 text-[9px] font-bold text-gray-400 hover:text-gray-600 transition-colors select-none">
+                  <span>d:{engineDepth} · L:{multiPV}</span>
+                  {settingsOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                </button>
+              )}
+              {/* Engine on/off */}
+              <button onClick={() => { setEngineOn(e => !e); setSettingsOpen(false); }}
+                className={cn("relative w-10 h-5 rounded-full transition-colors duration-200", engineOn ? "bg-green-500" : "bg-gray-300")}>
+                <span className={cn("absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-200", engineOn ? "left-5" : "left-0.5")} />
+              </button>
+            </div>
           </div>
 
-          {engineOn && (<>
-            {/* Depth slider */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Depth</span>
-                <span className="text-[12px] font-black text-gray-800 tabular-nums">
-                  {currentDepth > 0 ? `${currentDepth} / ${engineDepth}` : engineDepth}
-                </span>
+          {/* Collapsible settings */}
+          {engineOn && settingsOpen && (
+            <div className="px-3 pb-3 space-y-2.5 border-t border-gray-50">
+              {/* Depth */}
+              <div className="space-y-1 pt-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Depth</span>
+                  <span className="text-[12px] font-black text-gray-800 tabular-nums">
+                    {currentDepth > 0 ? `${currentDepth} / ${engineDepth}` : engineDepth}
+                  </span>
+                </div>
+                <input type="range" min="5" max="30" step="1" value={engineDepth}
+                  onChange={e => setEngineDepth(parseInt(e.target.value))}
+                  className="w-full h-2 rounded-full appearance-none cursor-pointer outline-none"
+                  style={{ background: `linear-gradient(to right, #f97316 0%, #f97316 ${depthPct}%, #e5e7eb ${depthPct}%, #e5e7eb 100%)` }}
+                />
+                <div className="flex justify-between text-[9px] text-gray-400 select-none"><span>5 (fast)</span><span>30 (slow)</span></div>
               </div>
-              <input type="range" min="5" max="30" step="1" value={engineDepth}
-                onChange={e => setEngineDepth(parseInt(e.target.value))}
-                className="w-full h-2 rounded-full appearance-none cursor-pointer outline-none"
-                style={{ background: `linear-gradient(to right, #f97316 0%, #f97316 ${depthPct}%, #e5e7eb ${depthPct}%, #e5e7eb 100%)` }}
-              />
-              <div className="flex justify-between text-[9px] text-gray-400 select-none"><span>5</span><span>30</span></div>
-            </div>
-
-            {/* Lines (MultiPV) */}
-            <div className="space-y-1">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Lines</span>
-              <div className="flex gap-1">
-                {[1, 2, 3, 4, 5].map(n => (
-                  <button key={n} onClick={() => setMultiPV(n)}
-                    className={cn("flex-1 h-7 text-[12px] font-bold rounded-lg border-2 transition-all",
-                      multiPV === n ? "border-orange-500 bg-orange-500 text-white" : "border-gray-200 text-gray-500 hover:border-gray-400"
-                    )}>{n}</button>
-                ))}
+              {/* Lines */}
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Lines</span>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <button key={n} onClick={() => setMultiPV(n)}
+                      className={cn("flex-1 h-7 text-[12px] font-bold rounded-lg border-2 transition-all",
+                        multiPV === n ? "border-orange-500 bg-orange-500 text-white" : "border-gray-200 text-gray-500 hover:border-gray-400"
+                      )}>{n}</button>
+                  ))}
+                </div>
               </div>
             </div>
-          </>)}
+          )}
         </div>
 
-        {/* Variations — scrollable */}
+        {/* Variation lines */}
         {engineOn && variationsSan.length > 0 && (
-          <div className="shrink-0 border-b border-gray-100 p-2.5 space-y-2 max-h-[230px] overflow-y-auto">
-            {/* Horizontal eval bar */}
-            <div className="space-y-1 pb-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-gray-400 font-medium">Black</span>
-                <span className={cn("text-[13px] font-black tabular-nums",
-                  (topVar?.score ?? 0) > 50 ? "text-gray-900" : (topVar?.score ?? 0) < -50 ? "text-gray-500" : "text-gray-700"
-                )}>
-                  {evalStr(topVar?.score, topVar?.isMate, topVar?.mateIn)}
-                </span>
-                <span className="text-[9px] text-gray-400 font-medium">White</span>
-              </div>
-              <div className="h-2.5 rounded-full overflow-hidden bg-gray-800">
-                <div className="h-full bg-gray-100 float-right transition-all duration-500 rounded-l-sm"
-                  style={{ width: `${evalPct}%` }} />
-              </div>
-            </div>
-
-            {/* Variation cards */}
-            {variationsSan.map((v, i) => (
-              <div key={v.line} className={cn("rounded-xl px-2.5 py-2 border",
-                i === 0 ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-100"
-              )}>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className={cn("text-[12px] font-black tabular-nums", i === 0 ? "text-green-700" : "text-gray-700")}>
-                    {evalStr(v.score, v.isMate, v.mateIn)}
-                  </span>
-                  <span className="text-[9px] text-gray-400">d{v.depth}</span>
-                  {i === 0 && v.pvSan[0] && (
-                    <span className="ml-auto text-[10px] font-black text-green-700 font-mono">{v.pvSan[0]}</span>
-                  )}
+          <div className="shrink-0 border-b border-gray-100 p-2 space-y-1">
+            {variationsSan.map((v, i) => {
+              const expanded = expandedVars.has(v.line);
+              const pv = formatPv(currentFen, v.pvSan.slice(0, expanded ? 8 : 4));
+              return (
+                <div key={v.line}
+                  className={cn("rounded-xl border", i === 0 ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-100")}>
+                  <div className="flex items-start gap-1.5 px-2 py-1.5">
+                    {/* Eval + depth */}
+                    <div className="flex flex-col items-start shrink-0 pt-px">
+                      <span className={cn("text-[11px] font-black tabular-nums leading-none",
+                        i === 0 ? "text-green-700" : "text-gray-700")}>
+                        {evalStr(v.score, v.isMate, v.mateIn)}
+                      </span>
+                      <span className="text-[8px] text-gray-400 mt-0.5">d{v.depth}</span>
+                    </div>
+                    {/* PV moves */}
+                    <p className={cn("text-[10.5px] text-gray-600 font-mono flex-1 min-w-0 leading-snug",
+                      expanded ? "" : "truncate"
+                    )}>
+                      {pv || "…"}
+                    </p>
+                    {/* Expand toggle */}
+                    <button onClick={() => toggleVar(v.line)}
+                      className="shrink-0 mt-0.5 text-gray-400 hover:text-gray-600 transition-colors p-0.5 rounded">
+                      {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                    </button>
+                  </div>
                 </div>
-                <p className="text-[10.5px] text-gray-600 font-mono leading-snug">
-                  {formatPv(currentFen, v.pvSan.slice(0, 8)) || "…"}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -478,8 +501,7 @@ export default function AnalysePage() {
                     {i % 2 === 0 && <span className="text-[11px] text-gray-400 select-none mr-0.5">{mn}.</span>}
                     <button data-active={isActive} onClick={() => setPosIdx(i + 1)}
                       className={cn("text-[12px] font-bold px-1.5 py-0.5 rounded-lg mr-1 transition-colors",
-                        isActive ? "bg-orange-500 text-white" : "text-gray-700 hover:bg-gray-100"
-                      )}>
+                        isActive ? "bg-orange-500 text-white" : "text-gray-700 hover:bg-gray-100")}>
                       {pos.san}
                     </button>
                   </span>
@@ -489,7 +511,7 @@ export default function AnalysePage() {
           )}
         </div>
 
-        {/* FEN — below notation */}
+        {/* FEN */}
         <div className="shrink-0 border-t border-gray-100 p-3 space-y-1.5">
           <p className="text-[10px] font-black uppercase tracking-[0.15em] text-gray-400">Position (FEN)</p>
           <div className="flex gap-1.5">
@@ -556,7 +578,7 @@ export default function AnalysePage() {
                         ? (side === "w" ? "border-gray-300 bg-white text-gray-900" : "border-gray-800 bg-gray-800 text-white")
                         : "border-gray-200 text-gray-500 hover:border-gray-300"
                     )}>
-                    {side === "w" ? "White to move" : "Black to move"}
+                    {side === "w" ? "White" : "Black"}
                   </button>
                 ))}
               </div>
