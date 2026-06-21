@@ -70,8 +70,8 @@ function MainApp() {
             currentPage={page}
           />
 
-          <main className="flex-1 overflow-y-auto">
-            <div className="page-enter">
+          <main className="flex-1 overflow-y-auto flex flex-col">
+            <div className="page-enter flex-1">
               {page === "home"       && <HomePage onNav={setPage} />}
               {page === "batches"    && <BatchesPage />}
               {page === "blitz-race" && <BlitzRacePage />}

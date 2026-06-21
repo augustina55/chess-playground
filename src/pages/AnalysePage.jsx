@@ -18,6 +18,7 @@ function spawnEngine() {
 function flipTurn(fen) {
   const p = fen.split(" ");
   p[1] = p[1] === "w" ? "b" : "w";
+  p[3] = "-"; // clear en passant — invalid after flipping turn
   return p.join(" ");
 }
 
@@ -364,8 +365,8 @@ export default function AnalysePage() {
       {/* ── Main area ── */}
       <div className="flex-1 flex overflow-hidden">
 
-        {/* Board column */}
-        <div className="flex-1 flex items-center justify-center p-4 gap-3 overflow-hidden min-w-0">
+        {/* Board column — default align-items:stretch so children fill height */}
+        <div className="flex-1 flex p-4 gap-3 overflow-hidden min-w-0">
           {engineOn && (
             <EvalBar
               score={info?.score}
@@ -374,7 +375,7 @@ export default function AnalysePage() {
               flipped={boardFlipped}
             />
           )}
-          <div ref={boardContainerRef} className="flex-1 h-full flex items-center justify-center overflow-hidden">
+          <div ref={boardContainerRef} className="flex-1 flex items-center justify-center overflow-hidden">
             {editMode ? (
               <Chessboard
                 id="analyse-edit"
