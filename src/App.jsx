@@ -14,6 +14,7 @@ import ActivityPage from "./pages/ActivityPage";
 import ClassNotesPage from "./pages/ClassNotesPage";
 import LearnPage from "./pages/LearnPage";
 import PlayPage from "./pages/PlayPage";
+import AnalysePage from "./pages/AnalysePage";
 import ProfilePage from "./pages/ProfilePage";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -78,6 +79,7 @@ function MainApp() {
               {page === "pgn-center" && <PgnCenterPage />}
               {page === "activity"    && <ActivityPage />}
               {page === "play"        && <PlayPage />}
+              {page === "analyse"     && <AnalysePage />}
               {page === "learn"       && <LearnPage />}
               {page === "class-notes" && <ClassNotesPage />}
 {page === "academy"    && (user?.role === "admin" || user?.role === "coach") && <AcademyPage />}
