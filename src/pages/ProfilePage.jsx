@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, LogOut, Check, ExternalLink, Unlink, Eye, EyeOff,
-  Bell, Palette, Building2, Clock, ChevronDown,
+  Bell, Palette, Building2, Clock,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { startLichessOAuth } from "../utils/lichess";
@@ -68,11 +68,10 @@ function TabBar({ tab, setTab }) {
 // ── My Profile tab ────────────────────────────────────────────────────────────
 
 function MyAcademiesSection() {
-  const { user, updateUser } = useAuth();
+  const { user } = useAuth();
   const [ownAcademy,   setOwnAcademy]   = useState(null);
   const [accepted,     setAccepted]     = useState([]);
   const [pending,      setPending]      = useState([]);
-  const [switching,    setSwitching]    = useState(null);
   const [responding,   setResponding]   = useState(null);
   const [loaded,       setLoaded]       = useState(false);
 
@@ -90,20 +89,6 @@ function MyAcademiesSection() {
       setLoaded(true);
     }).catch(() => setLoaded(true));
   }, [user?.id, user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function setActive(academyId, academyName, academyLogo) {
-    setSwitching(academyId);
-    try {
-      await updateUser({ settings: { ...(user?.settings || {}), activeAcademyId: academyId } });
-      localStorage.setItem("ca_academy_name", academyName || "");
-      localStorage.setItem("ca_academy_logo", academyLogo || "");
-      window.dispatchEvent(new CustomEvent("ca-logo-update"));
-    } catch (err) {
-      console.error("Failed to switch academy:", err);
-    } finally {
-      setSwitching(null);
-    }
-  }
 
   async function respond(invitationId, accept) {
     setResponding(invitationId);
@@ -152,47 +137,35 @@ function MyAcademiesSection() {
           <span className="w-5 h-5 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
         </div>
       ) : (
-        <div className="p-4 space-y-3">
+        <div className="p-4 space-y-2">
 
-          {/* Academy selector dropdown */}
-          {acceptedList.length > 0 && (
-            <div>
-              <div className="relative">
-                {/* Active academy logo */}
-                <div className="absolute left-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-[#f97316] flex items-center justify-center overflow-hidden pointer-events-none border border-[#1a140f]/20">
-                  {activeAcademy?.logo
-                    ? <img src={activeAcademy.logo} alt="" className="w-full h-full object-cover" />
-                    : <Building2 size={11} className="text-white" />
-                  }
+          {/* Academy list — read-only; switching done from header */}
+          {acceptedList.map(ac => {
+            const isActive = String(ac.id) === String(activeId);
+            return (
+              <div key={ac.id} className={cn(
+                "flex items-center gap-3 px-4 py-3 rounded-2xl border transition-colors",
+                isActive ? "border-[#f97316]/30 bg-orange-50" : "border-gray-100 bg-gray-50"
+              )}>
+                <div className="w-9 h-9 rounded-full bg-[#f97316] flex items-center justify-center overflow-hidden shrink-0 border-2 border-[#1a140f]">
+                  {ac.logo
+                    ? <img src={ac.logo} alt="" className="w-full h-full object-cover" />
+                    : <Building2 size={14} className="text-white" />}
                 </div>
-                <select
-                  value={String(activeId || acceptedList[0]?.id || "")}
-                  onChange={e => {
-                    const ac = acceptedList.find(a => String(a.id) === e.target.value);
-                    if (ac) setActive(ac.id, ac.name, ac.logo);
-                  }}
-                  disabled={!!switching}
-                  className="w-full h-12 rounded-2xl border border-gray-200 bg-white pl-12 pr-10 text-[13px] font-bold text-gray-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all appearance-none cursor-pointer disabled:opacity-60"
-                >
-                  {acceptedList.map(ac => (
-                    <option key={ac.id} value={String(ac.id)}>
-                      {ac.name}{ac.isOwn ? " (Your academy)" : ""}
-                    </option>
-                  ))}
-                </select>
-                {switching ? (
-                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin pointer-events-none" />
-                ) : (
-                  <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <div className="flex-1 min-w-0">
+                  <p className={cn("text-[13px] font-bold truncate", isActive ? "text-[#f97316]" : "text-gray-800")}>
+                    {ac.name}
+                  </p>
+                  <p className="text-[11px] text-gray-400">{ac.isOwn ? "Your academy" : "Member"}</p>
+                </div>
+                {isActive && (
+                  <span className="text-[10px] font-black text-[#f97316] bg-orange-100 px-2 py-0.5 rounded-full shrink-0">
+                    Active
+                  </span>
                 )}
               </div>
-              {activeAcademy && (
-                <p className="text-[11px] text-gray-400 mt-1.5 px-1">
-                  {activeAcademy.isOwn ? "Your academy" : "Member"} · Active workspace
-                </p>
-              )}
-            </div>
-          )}
+            );
+          })}
 
           {/* Pending invitations */}
           {pending.map(inv => (
