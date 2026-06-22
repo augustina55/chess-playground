@@ -247,3 +247,5 @@ create index if not exists class_sessions_academy_id_idx on class_sessions(acade
 create index if not exists class_sessions_date_idx       on class_sessions(date desc);
 
 alter table class_sessions add column if not exists pdf_attachments jsonb default '[]';
+alter table class_sessions add column if not exists present_count  int;
+alter table class_sessions add column if not exists total_count    int;

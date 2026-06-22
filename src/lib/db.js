@@ -819,6 +819,8 @@ function sessionFromDb(row) {
     notes:          row.notes            || '',
     pgnIds:         row.pgn_ids          || [],
     pdfAttachments: row.pdf_attachments  || [],
+    presentCount:   row.present_count    ?? null,
+    totalCount:     row.total_count      ?? null,
     createdBy:      row.created_by,
     createdAt:      row.created_at,
   }
@@ -855,7 +857,7 @@ export async function getClassSessionByBatchDate(batchId, date) {
   return data ? sessionFromDb(data) : null
 }
 
-export async function createClassSession({ batchId, batchName, academyId, date, title, notes, pgnIds, pdfAttachments, createdBy }) {
+export async function createClassSession({ batchId, batchName, academyId, date, title, notes, pgnIds, pdfAttachments, presentCount, totalCount, createdBy }) {
   const { data, error } = await db()
     .from('class_sessions')
     .insert({
@@ -867,6 +869,8 @@ export async function createClassSession({ batchId, batchName, academyId, date, 
       notes:           notes           || null,
       pgn_ids:         pgnIds          || [],
       pdf_attachments: pdfAttachments  || [],
+      present_count:   presentCount    ?? null,
+      total_count:     totalCount      ?? null,
       created_by:      createdBy       || null,
     })
     .select()
@@ -875,12 +879,14 @@ export async function createClassSession({ batchId, batchName, academyId, date, 
   return sessionFromDb(data)
 }
 
-export async function updateClassSession(id, { title, notes, pgnIds, pdfAttachments, date }) {
+export async function updateClassSession(id, { title, notes, pgnIds, pdfAttachments, presentCount, totalCount, date }) {
   const patch = {}
   if (title          !== undefined) patch.title           = title
   if (notes          !== undefined) patch.notes           = notes
   if (pgnIds         !== undefined) patch.pgn_ids         = pgnIds
   if (pdfAttachments !== undefined) patch.pdf_attachments = pdfAttachments
+  if (presentCount   !== undefined) patch.present_count   = presentCount
+  if (totalCount     !== undefined) patch.total_count     = totalCount
   if (date           !== undefined) patch.date            = date
   const { data, error } = await db()
     .from('class_sessions')

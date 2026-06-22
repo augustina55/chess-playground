@@ -13,7 +13,7 @@ import {
   getProfilesByAcademy, getProfiles, getAcademies, getBatchesForStudent,
   getAcademyInvitations,
   upsertAttendance, getAttendanceByBatchDate,
-  getClassSessionByBatchDate, createClassSession, updateClassSession,
+  getClassSessionByBatchDate, getClassSessionsByAcademy, createClassSession, updateClassSession,
   getPgns, createPgn,
 } from "../lib/db";
 
@@ -656,7 +656,7 @@ function StudentToggle({ student, present, onChange }) {
 
 // ── ClassSessionDrawer ────────────────────────────────────────────────────────
 
-function ClassSessionDrawer({ open, batch, date, academyId, onClose }) {
+function ClassSessionDrawer({ open, batch, date, academyId, onClose, onSessionSaved }) {
   const dateStr = date ? `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}` : null;
   const dateLabel = date ? date.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : "";
 
@@ -703,24 +703,36 @@ function ClassSessionDrawer({ open, batch, date, academyId, onClose }) {
     if (!batch || !dateStr) return;
     setSaving(true);
     try {
-      if (students.length > 0) {
+      const pCount = students.filter(s => present[s.id] === true).length;
+      const tCount = students.length;
+
+      if (tCount > 0) {
         const records = students.map(s => ({
-          batch_id:  batch.id,
+          batch_id:   batch.id,
           student_id: s.id,
-          date:      dateStr,
-          present:   present[s.id] !== undefined ? present[s.id] : true,
+          date:       dateStr,
+          present:    present[s.id] !== undefined ? present[s.id] : true,
           academy_id: academyId || null,
         }));
         await upsertAttendance(records);
       }
-      const payload = { batchId: batch.id, batchName: batch.name, academyId, date: dateStr, ...form };
+
+      const payload = {
+        batchId: batch.id, batchName: batch.name, academyId, date: dateStr,
+        ...form,
+        presentCount: tCount > 0 ? pCount : null,
+        totalCount:   tCount > 0 ? tCount : null,
+      };
+
+      let saved;
       if (session?.id) {
-        const updated = await updateClassSession(session.id, payload);
-        setSession(updated);
+        saved = await updateClassSession(session.id, payload);
+        setSession(saved);
       } else {
-        const created = await createClassSession(payload);
-        setSession(created);
+        saved = await createClassSession(payload);
+        setSession(saved);
       }
+      if (onSessionSaved) onSessionSaved(saved);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -971,22 +983,38 @@ function ClassSessionDrawer({ open, batch, date, academyId, onClose }) {
 
 // ── Calendar views ─────────────────────────────────────────────────────────────
 
-function BatchChip({ batch, date, onClick }) {
+function attendanceColor(session) {
+  if (!session || session.totalCount == null || session.totalCount === 0) return null;
+  return session.presentCount >= session.totalCount * 0.5
+    ? "bg-emerald-100 text-emerald-700"
+    : "bg-red-100 text-red-700";
+}
+
+function attendanceBarColor(session) {
+  if (!session || session.totalCount == null || session.totalCount === 0) return null;
+  return session.presentCount >= session.totalCount * 0.5 ? "bg-emerald-500" : "bg-red-500";
+}
+
+function BatchChip({ batch, date, onClick, session }) {
   const jsDay = date.getDay();
   const dayVal = DAYS.find(d => d.js === jsDay)?.value;
   const time = batch.times?.[dayVal];
+  const color = attendanceColor(session) || LEVEL_CAL[batch.level] || "bg-brand-100 text-brand-700";
   return (
     <div title={`${batch.name}${time ? " · " + fmtTime(time) : ""}`}
       onClick={onClick}
-      className={cn("px-1.5 py-0.5 rounded-md text-[10px] font-semibold truncate leading-tight cursor-pointer hover:opacity-75 transition-opacity",
-        LEVEL_CAL[batch.level] || "bg-brand-100 text-brand-700")}>
+      className={cn("px-1.5 py-0.5 rounded-md text-[10px] font-semibold truncate leading-tight cursor-pointer hover:opacity-75 transition-opacity", color)}>
       {time && <span className="opacity-60 mr-0.5">{fmtTime(time)}</span>}
       {batch.name}
     </div>
   );
 }
 
-function MonthView({ cursor, batches, onBatchClick }) {
+function dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+}
+
+function MonthView({ cursor, batches, onBatchClick, sessionMap }) {
   const today = new Date();
   const grid  = getMonthGrid(cursor.getFullYear(), cursor.getMonth());
 
@@ -1017,7 +1045,7 @@ function MonthView({ cursor, batches, onBatchClick }) {
                 {date.getDate()}
               </span>
               <div className="space-y-0.5">
-                {items.slice(0, 2).map(b => <BatchChip key={b.id} batch={b} date={date} onClick={() => onBatchClick(b, date)} />)}
+                {items.slice(0, 2).map(b => <BatchChip key={b.id} batch={b} date={date} onClick={() => onBatchClick(b, date)} session={sessionMap?.[`${b.id}_${dateKey(date)}`]} />)}
                 {items.length > 2 && (
                   <p className="text-[9px] text-gray-400 pl-0.5">+{items.length - 2} more</p>
                 )}
@@ -1030,7 +1058,7 @@ function MonthView({ cursor, batches, onBatchClick }) {
   );
 }
 
-function WeekView({ cursor, batches, onBatchClick }) {
+function WeekView({ cursor, batches, onBatchClick, sessionMap }) {
   const today = new Date();
   const week  = getWeekGrid(cursor);
   const cols  = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -1061,7 +1089,8 @@ function WeekView({ cursor, batches, onBatchClick }) {
                   const time  = b.times?.[dv];
                   return (
                     <div key={b.id} onClick={() => onBatchClick(b, date)}
-                      className={cn("rounded-xl p-2 cursor-pointer hover:opacity-80 transition-opacity", LEVEL_CAL[b.level] || "bg-brand-100 text-brand-700")}>
+                      className={cn("rounded-xl p-2 cursor-pointer hover:opacity-80 transition-opacity",
+                        attendanceColor(sessionMap?.[`${b.id}_${dateKey(date)}`]) || LEVEL_CAL[b.level] || "bg-brand-100 text-brand-700")}>
                       {time && <p className="text-[10px] font-bold opacity-70 mb-0.5">{fmtTime(time)}</p>}
                       <p className="text-[11px] font-bold truncate leading-tight">{b.name}</p>
                     </div>
@@ -1076,7 +1105,7 @@ function WeekView({ cursor, batches, onBatchClick }) {
   );
 }
 
-function DayView({ cursor, batches, studentCounts, onBatchClick }) {
+function DayView({ cursor, batches, studentCounts, onBatchClick, sessionMap }) {
   const jsDay = cursor.getDay();
   const dv    = DAYS.find(d => d.js === jsDay)?.value;
   const items = batchesForDate(batches, cursor).sort((a, b) => {
@@ -1096,13 +1125,15 @@ function DayView({ cursor, batches, studentCounts, onBatchClick }) {
         <div className="divide-y divide-gray-100">
           {items.map(b => {
             const time = b.times?.[dv];
+            const sess = sessionMap?.[`${b.id}_${dateKey(cursor)}`];
+            const barColor = attendanceBarColor(sess) || LEVEL_BAR[b.level] || "bg-brand-500";
             return (
               <div key={b.id} onClick={() => onBatchClick(b, cursor)}
                 className="flex items-center gap-4 px-6 py-5 cursor-pointer hover:bg-gray-50 transition-colors">
                 <div className="w-20 shrink-0">
                   <p className="text-[14px] font-black text-gray-700">{time ? fmtTime(time) : "—"}</p>
                 </div>
-                <span className={cn("w-1 h-12 rounded-full shrink-0", LEVEL_BAR[b.level] || "bg-brand-500")} />
+                <span className={cn("w-1 h-12 rounded-full shrink-0", barColor)} />
                 <div className="min-w-0 flex-1">
                   <p className="text-[14px] font-bold text-gray-900">{b.name}</p>
                   <p className="text-[12px] text-gray-400 mt-0.5">{b.coach || "—"} · {b.level}</p>
@@ -1131,6 +1162,25 @@ function CalendarTab({ batches, studentCounts, academyId }) {
   const [cursor,         setCursor]         = useState(new Date());
   const [coachFilter,    setCoach]          = useState("all");
   const [sessionTarget,  setSessionTarget]  = useState(null);
+  const [sessions,       setSessions]       = useState([]);
+
+  useEffect(() => {
+    if (!academyId) return;
+    getClassSessionsByAcademy(academyId).then(setSessions).catch(() => {});
+  }, [academyId]);
+
+  const sessionMap = useMemo(() => {
+    const map = {};
+    sessions.forEach(s => { map[`${s.batchId}_${s.date}`] = s; });
+    return map;
+  }, [sessions]);
+
+  function handleSessionSaved(session) {
+    setSessions(prev => {
+      const idx = prev.findIndex(s => s.id === session.id);
+      return idx >= 0 ? prev.map((s, i) => i === idx ? session : s) : [...prev, session];
+    });
+  }
 
   const coaches = useMemo(() => [...new Set(batches.map(b => b.coach).filter(Boolean))], [batches]);
 
@@ -1193,9 +1243,9 @@ function CalendarTab({ batches, studentCounts, academyId }) {
         </button>
       </div>
 
-      {viewMode === "month" && <MonthView cursor={cursor} batches={visible} onBatchClick={(b, d) => setSessionTarget({ batch: b, date: d })} />}
-      {viewMode === "week"  && <WeekView  cursor={cursor} batches={visible} onBatchClick={(b, d) => setSessionTarget({ batch: b, date: d })} />}
-      {viewMode === "day"   && <DayView   cursor={cursor} batches={visible} studentCounts={studentCounts} onBatchClick={(b, d) => setSessionTarget({ batch: b, date: d })} />}
+      {viewMode === "month" && <MonthView cursor={cursor} batches={visible} onBatchClick={(b, d) => setSessionTarget({ batch: b, date: d })} sessionMap={sessionMap} />}
+      {viewMode === "week"  && <WeekView  cursor={cursor} batches={visible} onBatchClick={(b, d) => setSessionTarget({ batch: b, date: d })} sessionMap={sessionMap} />}
+      {viewMode === "day"   && <DayView   cursor={cursor} batches={visible} studentCounts={studentCounts} onBatchClick={(b, d) => setSessionTarget({ batch: b, date: d })} sessionMap={sessionMap} />}
 
       <ClassSessionDrawer
         open={!!sessionTarget}
@@ -1203,6 +1253,7 @@ function CalendarTab({ batches, studentCounts, academyId }) {
         date={sessionTarget?.date}
         academyId={academyId}
         onClose={() => setSessionTarget(null)}
+        onSessionSaved={handleSessionSaved}
       />
     </>
   );
