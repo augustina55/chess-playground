@@ -22,6 +22,7 @@ import {
   getClassSessionsByBatch, getAttendanceByBatch,
   getPgns, createPgn, getPgnsByIds,
   getHomeworkForBatch, getFullSubmissionsForStudent,
+  createHomework,
 } from "../lib/db";
 
 // ── constants ──────────────────────────────────────────────────────────────────
@@ -304,14 +305,15 @@ function AddBatchDrawer({ open, onClose, onSave, defaultCoach, coaches = [] }) {
 
 // ── CoachBatchDrawer ─────────────────────────────────────────────────────────
 
-function CoachBatchDrawer({ batch, open, onClose, academyStudents }) {
-  const [enrolled,   setEnrolled]   = useState([]);
-  const [sessions,   setSessions]   = useState([]);
-  const [loading,    setLoading]    = useState(false);
-  const [saving,     setSaving]     = useState(null);
-  const [searchQ,    setSearchQ]    = useState("");
-  const [pdfTarget,  setPdfTarget]  = useState(null);
-  const [pgnTarget,  setPgnTarget]  = useState(null);
+function CoachBatchDrawer({ batch, open, onClose, academyStudents, academyId, user }) {
+  const [enrolled,    setEnrolled]    = useState([]);
+  const [sessions,    setSessions]    = useState([]);
+  const [loading,     setLoading]     = useState(false);
+  const [saving,      setSaving]      = useState(null);
+  const [searchQ,     setSearchQ]     = useState("");
+  const [pdfTarget,   setPdfTarget]   = useState(null);
+  const [pgnTarget,   setPgnTarget]   = useState(null);
+  const [showHwModal, setShowHwModal] = useState(false);
 
   useEffect(() => {
     if (!batch || !open) return;
@@ -388,10 +390,16 @@ function CoachBatchDrawer({ batch, open, onClose, academyStudents }) {
                   <span className="text-[12px] text-gray-400">{enrolled.length} student{enrolled.length !== 1 ? "s" : ""}</span>
                 </div>
               </div>
-              <button onClick={onClose}
-                className="w-9 h-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors shrink-0 ml-3">
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2 shrink-0 ml-3">
+                <button onClick={() => setShowHwModal(true)}
+                  className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-[#f97316] hover:bg-[#ea6c00] text-white text-[12px] font-bold transition-colors">
+                  <Plus size={13} />Homework
+                </button>
+                <button onClick={onClose}
+                  className="w-9 h-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {/* Two-panel body */}
@@ -547,7 +555,124 @@ function CoachBatchDrawer({ batch, open, onClose, academyStudents }) {
 
       {pdfTarget && <PdfViewer pdfs={pdfTarget.pdfs} initialIndex={pdfTarget.idx} title={pdfTarget.title} onClose={() => setPdfTarget(null)} />}
       {pgnTarget && <PgnViewer pgn={pgnTarget.pgn} title={pgnTarget.title} onClose={() => setPgnTarget(null)} />}
+      {showHwModal && (
+        <AddHomeworkModal
+          batch={batch}
+          academyId={academyId}
+          assignedBy={user?.name}
+          onClose={() => setShowHwModal(false)}
+        />
+      )}
     </>
+  );
+}
+
+// ── AddHomeworkModal ──────────────────────────────────────────────────────────
+
+function AddHomeworkModal({ batch, academyId, assignedBy, onClose }) {
+  const [pgns,    setPgns]    = useState([]);
+  const [form,    setForm]    = useState({ title: "", dueDate: "", pgnId: "" });
+  const [saving,  setSaving]  = useState(false);
+  const [saved,   setSaved]   = useState(false);
+
+  useEffect(() => {
+    getPgns().then(setPgns).catch(() => {});
+  }, []);
+
+  async function handleSave(e) {
+    e.preventDefault();
+    if (!form.title.trim()) return;
+    setSaving(true);
+    try {
+      const pgn = pgns.find(p => String(p.id) === String(form.pgnId));
+      await createHomework({
+        id:          `HW-${Date.now()}`,
+        title:       form.title.trim(),
+        batchId:     batch?.id     || null,
+        batchName:   batch?.name   || null,
+        pgnId:       pgn?.id       || null,
+        pgnName:     pgn?.name     || null,
+        dueDate:     form.dueDate  || null,
+        assignedBy:  assignedBy    || null,
+        academyId:   academyId     || null,
+      });
+      setSaved(true);
+      setTimeout(onClose, 900);
+    } catch (err) {
+      console.error("createHomework:", err);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-[420px] bg-white rounded-[24px] border-2 border-[#1a140f] shadow-[0_8px_0_#1a140f,0_16px_48px_rgba(0,0,0,0.2)] overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+          <div>
+            <h2 className="font-black text-[17px] text-gray-900">Add Homework</h2>
+            <p className="text-[12px] text-gray-400 mt-0.5">{batch?.name}</p>
+          </div>
+          <button onClick={onClose}
+            className="w-9 h-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors">
+            <X size={15} />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSave} className="px-6 py-5 space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400">Title</label>
+            <input
+              autoFocus
+              required
+              className="w-full h-11 rounded-2xl border border-gray-200 bg-white px-4 text-[13px] text-gray-800 placeholder:text-gray-400 outline-none focus:border-[#f97316] focus:ring-4 focus:ring-orange-500/10 transition-all"
+              placeholder="e.g. Opening Puzzles"
+              value={form.title}
+              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400">Due Date</label>
+            <input
+              type="date"
+              className="w-full h-11 rounded-2xl border border-gray-200 bg-white px-4 text-[13px] text-gray-800 outline-none focus:border-[#f97316] focus:ring-4 focus:ring-orange-500/10 transition-all"
+              value={form.dueDate}
+              onChange={e => setForm(f => ({ ...f, dueDate: e.target.value }))}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-400">PGN</label>
+            <select
+              className="w-full h-11 rounded-2xl border border-gray-200 bg-white px-4 text-[13px] text-gray-700 outline-none focus:border-[#f97316] focus:ring-4 focus:ring-orange-500/10 transition-all appearance-none cursor-pointer"
+              value={form.pgnId}
+              onChange={e => setForm(f => ({ ...f, pgnId: e.target.value }))}
+            >
+              <option value="">— No PGN —</option>
+              {pgns.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className={cn(
+              "w-full h-12 rounded-2xl font-bold text-[14px] transition-all mt-2",
+              saved
+                ? "bg-emerald-500 text-white"
+                : "bg-[#f97316] hover:bg-[#ea6c00] text-white shadow-[0_4px_0_#c2530f] hover:-translate-y-0.5 disabled:opacity-60 disabled:translate-y-0"
+            )}>
+            {saved ? "✓ Saved!" : saving ? "Saving…" : "Save Homework"}
+          </button>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -701,6 +826,8 @@ function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, a
         open={!!selected}
         onClose={() => setSelected(null)}
         academyStudents={academyStudents}
+        academyId={academy?.id}
+        user={user}
       />
     </>
   );
