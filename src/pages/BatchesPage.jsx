@@ -11,7 +11,7 @@ import {
   getBatches, getBatchesByAcademy, createBatch, deleteBatch,
   getBatchStudents, addStudentToBatch, removeStudentFromBatch, getBatchStudentCounts,
   getProfilesByAcademy, getProfiles, getAcademies, getBatchesForStudent,
-  getAcademyInvitations,
+  getAcademyInvitations, getCoachAcademies,
   upsertAttendance, getAttendanceByBatchDate,
   getClassSessionByBatchDate, getClassSessionsByAcademy, createClassSession, updateClassSession,
   getPgns, createPgn,
@@ -1344,46 +1344,76 @@ function StudentBatchesView({ search }) {
 
 function CoachAdminBatchesView({ search }) {
   const { user }         = useAuth();
+  const [allAcademies,    setAllAcademies]    = useState([]);  // [{id, name, logo, isOwn}]
+  const [selectedId,      setSelectedId]      = useState(null);
+  const [academiesReady,  setAcademiesReady]  = useState(false);
   const [batches,         setBatches]         = useState([]);
   const [studentCounts,   setStudentCounts]   = useState({});
   const [academyStudents, setAcademyStudents] = useState([]);
-  const [academyId,       setAcademyId]       = useState(null);
   const [academyCoaches,  setAcademyCoaches]  = useState([]);
   const [tab,             setTab]             = useState("batches");
 
+  // Phase 1 — discover which academies this coach belongs to
   useEffect(() => {
-    getAcademies().then(all => {
-      let ac = null;
-      if (user?.role === "coach")
-        ac = all.find(a => String(a.mainCoachId) === String(user?.id));
-      const id = ac?.id || null;
-      setAcademyId(id);
-
-      const batchLoader   = id ? getBatchesByAcademy(id) : getBatches();
-      const profileLoader = id ? getProfilesByAcademy(id) : getProfiles();
-
-      Promise.all([batchLoader, profileLoader, getBatchStudentCounts()])
-        .then(([b, profiles, counts]) => {
-          setBatches(b);
-          setAcademyStudents(profiles);
-          setStudentCounts(counts);
-        });
-
-      if (id) {
-        getAcademyInvitations(id).then(invs => {
-          const list = invs
-            .filter(i => i.status === "accepted")
-            .map(i => ({ id: i.coachId, name: i.coachName }));
-          if (user?.role === "coach" && user?.id && !list.find(c => String(c.id) === String(user.id))) {
-            list.unshift({ id: user.id, name: user.name });
-          }
-          setAcademyCoaches(list);
-        });
-      } else if (user?.role === "coach" && user?.id) {
-        setAcademyCoaches([{ id: user.id, name: user.name }]);
-      }
+    if (!user?.id) return;
+    if (user?.role !== "coach") {
+      setAcademiesReady(true);  // admin: skip, load all batches
+      return;
+    }
+    Promise.all([getAcademies(), getCoachAcademies(user.id)]).then(([allAc, invs]) => {
+      const list = [];
+      const own = allAc.find(a => String(a.mainCoachId) === String(user.id));
+      if (own) list.push({ id: own.id, name: own.name, logo: own.logo, isOwn: true });
+      invs.forEach(inv => {
+        if (!list.find(a => String(a.id) === String(inv.academyId)))
+          list.push({ id: inv.academyId, name: inv.academyName, logo: inv.academyLogo, isOwn: false });
+      });
+      setAllAcademies(list);
+      const activeId = user?.settings?.activeAcademyId;
+      const def = list.find(a => String(a.id) === String(activeId)) || list[0];
+      setSelectedId(def?.id ?? null);
+      setAcademiesReady(true);
     });
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Phase 2 — load batches for selected academy (re-runs when academy selection changes)
+  useEffect(() => {
+    if (!academiesReady) return;
+    const id = selectedId;
+    const batchLoader   = id ? getBatchesByAcademy(id) : getBatches();
+    const profileLoader = id ? getProfilesByAcademy(id) : getProfiles();
+    Promise.all([batchLoader, profileLoader, getBatchStudentCounts()])
+      .then(([b, profiles, counts]) => {
+        setBatches(b);
+        setAcademyStudents(profiles);
+        setStudentCounts(counts);
+      });
+    if (id) {
+      getAcademyInvitations(id).then(invs => {
+        const coaches = invs
+          .filter(i => i.status === "accepted")
+          .map(i => ({ id: i.coachId, name: i.coachName }));
+        if (user?.id && !coaches.find(c => String(c.id) === String(user.id)))
+          coaches.unshift({ id: user.id, name: user.name });
+        setAcademyCoaches(coaches);
+      });
+    } else if (user?.id) {
+      setAcademyCoaches([{ id: user.id, name: user.name }]);
+    }
+  }, [academiesReady, selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync when active academy is changed via ProfilePage
+  useEffect(() => {
+    function sync() {
+      const activeId = JSON.parse(localStorage.getItem("caUser") || "{}").settings?.activeAcademyId;
+      if (activeId) {
+        const match = allAcademies.find(a => String(a.id) === String(activeId));
+        if (match) setSelectedId(match.id);
+      }
+    }
+    window.addEventListener("ca-logo-update", sync);
+    return () => window.removeEventListener("ca-logo-update", sync);
+  }, [allAcademies]);
 
   async function handleAddBatch(batch) {
     const id = `B-${Date.now()}`;
@@ -1391,7 +1421,7 @@ function CoachAdminBatchesView({ search }) {
       ...batch,
       id,
       students: [],
-      academyId: academyId || null,
+      academyId: selectedId || null,
       coachId:   batch.coachId || (user?.role === "coach" ? user?.id : null),
     });
     setBatches(prev => [...prev, created]);
@@ -1403,9 +1433,39 @@ function CoachAdminBatchesView({ search }) {
     setStudentCounts(prev => { const c = { ...prev }; delete c[id]; return c; });
   }
 
+  const selectedAcademy = allAcademies.find(a => String(a.id) === String(selectedId));
+
   return (
     <div className="min-h-screen bg-[#f6f8fc]">
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
+
+        {/* Academy selector — only shown when coach is in multiple academies */}
+        {allAcademies.length > 1 && (
+          <div className="mb-6">
+            <div className="relative inline-flex items-center max-w-xs w-full">
+              {selectedAcademy?.logo && (
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full overflow-hidden pointer-events-none shrink-0">
+                  <img src={selectedAcademy.logo} alt="" className="w-full h-full object-cover" />
+                </div>
+              )}
+              <select
+                value={String(selectedId || "")}
+                onChange={e => setSelectedId(Number(e.target.value) || e.target.value)}
+                className={cn(
+                  "w-full h-10 rounded-2xl border border-gray-200 bg-white pr-9 text-[13px] font-bold text-gray-800 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all appearance-none cursor-pointer shadow-sm",
+                  selectedAcademy?.logo ? "pl-10" : "pl-4"
+                )}
+              >
+                {allAcademies.map(a => (
+                  <option key={a.id} value={String(a.id)}>
+                    {a.name}{a.isOwn ? " (Your academy)" : ""}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center border-b-2 border-gray-200 mb-7 gap-0">
           {[["batches", "Batches"], ["calendar", "Calendar"]].map(([id, label]) => (
@@ -1438,7 +1498,7 @@ function CoachAdminBatchesView({ search }) {
           />
         )}
         {tab === "calendar" && (
-          <CalendarTab batches={batches} studentCounts={studentCounts} academyId={academyId} />
+          <CalendarTab batches={batches} studentCounts={studentCounts} academyId={selectedId} />
         )}
       </div>
     </div>
