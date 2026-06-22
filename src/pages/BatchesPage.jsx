@@ -1,9 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Chessboard } from "react-chessboard";
+import { Chess } from "chess.js";
 import {
   Plus, Users, Trash2, X, Link2, CalendarDays,
   ChevronLeft, ChevronRight, Clock, Search,
   UserPlus, UserMinus, Check, FileText, Upload, Download,
+  ChevronDown, MessageSquare, BookOpen, ExternalLink,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/utils";
@@ -14,7 +17,8 @@ import {
   getAcademyInvitations, getCoachAcademies,
   upsertAttendance, getAttendanceByBatchDate,
   getClassSessionByBatchDate, getClassSessionsByAcademy, createClassSession, updateClassSession,
-  getPgns, createPgn,
+  getClassSessionsByBatch, getAttendanceByBatch,
+  getPgns, createPgn, getPgnsByIds,
 } from "../lib/db";
 
 // ── constants ──────────────────────────────────────────────────────────────────
@@ -1259,13 +1263,495 @@ function CalendarTab({ batches, studentCounts, academyId }) {
   );
 }
 
+// ── PGN parser helpers ────────────────────────────────────────────────────────
+
+function splitPgnGames(content) {
+  if (!content) return [];
+  const chunks = content.trim().split(/\n\n(?=\[)/);
+  return chunks.filter(c => c.trim().startsWith("[") || c.trim().match(/^\d+\./));
+}
+
+function parsePgnGame(rawPgn) {
+  try {
+    const chess = new Chess();
+    chess.loadPgn(rawPgn);
+    // Extract header for title
+    const eventMatch = rawPgn.match(/\[Event\s+"([^"]+)"\]/);
+    const whiteMatch = rawPgn.match(/\[White\s+"([^"]+)"\]/);
+    const title = (eventMatch?.[1] && eventMatch[1] !== "?")
+      ? eventMatch[1]
+      : (whiteMatch?.[1] && whiteMatch[1] !== "?")
+        ? whiteMatch[1]
+        : "Game";
+
+    // Build move list with FENs and comments
+    const replay = new Chess();
+    const history = chess.history({ verbose: true });
+    const commentsMap = {};
+    chess.getComments().forEach(({ fen, comment }) => { commentsMap[fen] = comment; });
+
+    const moves = history.map(move => {
+      replay.move(move);
+      const fen = replay.fen();
+      return { san: move.san, fen, comment: commentsMap[fen] || null };
+    });
+
+    return { title, moves, startFen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" };
+  } catch {
+    return null;
+  }
+}
+
+// ── PdfViewer ─────────────────────────────────────────────────────────────────
+
+function PdfViewer({ pdfs, initialIndex = 0, onClose }) {
+  const [idx, setIdx] = useState(initialIndex);
+  const pdf = pdfs[idx];
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[300] flex flex-col bg-black/90">
+      {/* Header */}
+      <div className="shrink-0 flex items-center justify-between px-5 py-3 bg-[#1a140f] border-b border-white/10">
+        <div className="flex items-center gap-3">
+          <FileText size={16} className="text-orange-400" />
+          <span className="text-[14px] font-bold text-white truncate max-w-[300px]">{pdf?.name || "PDF"}</span>
+          {pdfs.length > 1 && (
+            <span className="text-[12px] text-white/40">{idx + 1} / {pdfs.length}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {pdfs.length > 1 && (
+            <>
+              <button onClick={() => setIdx(i => Math.max(0, i - 1))}
+                disabled={idx === 0}
+                className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center disabled:opacity-30 hover:bg-white/20 transition-colors">
+                <ChevronLeft size={14} />
+              </button>
+              <button onClick={() => setIdx(i => Math.min(pdfs.length - 1, i + 1))}
+                disabled={idx === pdfs.length - 1}
+                className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center disabled:opacity-30 hover:bg-white/20 transition-colors">
+                <ChevronRight size={14} />
+              </button>
+            </>
+          )}
+          <button onClick={onClose}
+            className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center hover:bg-red-500/60 transition-colors">
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* PDF content */}
+      <div className="flex-1 min-h-0">
+        {pdf?.data ? (
+          <embed src={pdf.data} type="application/pdf" className="w-full h-full" />
+        ) : (
+          <div className="flex items-center justify-center h-full text-white/40 text-[14px]">
+            No PDF data available
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── PgnViewer ─────────────────────────────────────────────────────────────────
+
+function PgnViewer({ pgn, onClose }) {
+  const [chapters,       setChapters]       = useState([]);
+  const [chapterIdx,     setChapterIdx]     = useState(0);
+  const [moveIdx,        setMoveIdx]        = useState(-1);
+  const commentsRef                          = useRef(null);
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    const games = splitPgnGames(pgn?.content || "");
+    const parsed = games.map(parsePgnGame).filter(Boolean);
+    setChapters(parsed.length ? parsed : [{ title: pgn?.name || "Game", moves: [], startFen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" }]);
+    setChapterIdx(0);
+    setMoveIdx(-1);
+  }, [pgn]);
+
+  const chapter = chapters[chapterIdx];
+  const currentFen = moveIdx < 0
+    ? chapter?.startFen
+    : chapter?.moves[moveIdx]?.fen;
+  const currentComment = moveIdx >= 0 ? chapter?.moves[moveIdx]?.comment : null;
+
+  // Scroll comments into view when they appear
+  useEffect(() => {
+    if (currentComment && commentsRef.current) {
+      commentsRef.current.scrollTop = commentsRef.current.scrollHeight;
+    }
+  }, [currentComment, moveIdx]);
+
+  function goTo(idx) {
+    setMoveIdx(Math.max(-1, Math.min((chapter?.moves.length ?? 0) - 1, idx)));
+  }
+
+  useEffect(() => {
+    function onKeyNav(e) {
+      if (e.key === "ArrowLeft")  goTo(moveIdx - 1);
+      if (e.key === "ArrowRight") goTo(moveIdx + 1);
+    }
+    window.addEventListener("keydown", onKeyNav);
+    return () => window.removeEventListener("keydown", onKeyNav);
+  }, [moveIdx, chapter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Build move number display
+  function movePairs(moves) {
+    const pairs = [];
+    for (let i = 0; i < moves.length; i += 2) {
+      pairs.push({ num: Math.floor(i / 2) + 1, white: moves[i], black: moves[i + 1] });
+    }
+    return pairs;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[300] flex flex-col bg-[#1a1a2e]">
+      {/* Header */}
+      <div className="shrink-0 flex items-center justify-between px-5 py-3 bg-[#1a140f] border-b border-white/10">
+        <div className="flex items-center gap-3">
+          <BookOpen size={16} className="text-orange-400" />
+          <span className="text-[14px] font-bold text-white">{pgn?.name || "PGN Viewer"}</span>
+        </div>
+        <button onClick={onClose}
+          className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center hover:bg-red-500/60 transition-colors">
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+
+        {/* Left: board + controls + moves */}
+        <div className="flex flex-col min-h-0 flex-1 p-4 gap-3 overflow-auto">
+          {/* Board */}
+          <div className="flex justify-center">
+            <div className="w-full max-w-[420px]">
+              {currentFen && (
+                <Chessboard
+                  position={currentFen}
+                  arePiecesDraggable={false}
+                  boardWidth={undefined}
+                  customBoardStyle={{ borderRadius: "12px", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Navigation controls */}
+          <div className="flex items-center justify-center gap-2">
+            <button onClick={() => goTo(-1)}
+              className="w-9 h-9 rounded-xl bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors disabled:opacity-30"
+              disabled={moveIdx < 0}>
+              <ChevronLeft size={14} className="mr-0.5" /><ChevronLeft size={14} className="-ml-2.5" />
+            </button>
+            <button onClick={() => goTo(moveIdx - 1)}
+              className="w-9 h-9 rounded-xl bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors disabled:opacity-30"
+              disabled={moveIdx < 0}>
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-[12px] text-white/40 w-20 text-center">
+              {moveIdx < 0 ? "Start" : `Move ${moveIdx + 1}`}
+            </span>
+            <button onClick={() => goTo(moveIdx + 1)}
+              className="w-9 h-9 rounded-xl bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors disabled:opacity-30"
+              disabled={!chapter || moveIdx >= chapter.moves.length - 1}>
+              <ChevronRight size={16} />
+            </button>
+            <button onClick={() => goTo((chapter?.moves.length ?? 0) - 1)}
+              className="w-9 h-9 rounded-xl bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors disabled:opacity-30"
+              disabled={!chapter || moveIdx >= chapter.moves.length - 1}>
+              <ChevronRight size={14} className="mr-0.5" /><ChevronRight size={14} className="-ml-2.5" />
+            </button>
+          </div>
+
+          {/* Move list */}
+          {chapter && chapter.moves.length > 0 && (
+            <div className="rounded-xl bg-black/20 p-3 overflow-y-auto max-h-[160px]">
+              <div className="flex flex-wrap gap-x-1 gap-y-0.5">
+                {movePairs(chapter.moves).map(({ num, white, black }) => (
+                  <span key={num} className="flex items-center gap-0.5">
+                    <span className="text-[11px] text-white/30 select-none">{num}.</span>
+                    <button
+                      onClick={() => goTo((num - 1) * 2)}
+                      className={cn(
+                        "px-1.5 py-0.5 rounded text-[12px] font-mono transition-colors",
+                        moveIdx === (num - 1) * 2
+                          ? "bg-orange-500 text-white"
+                          : "text-white/70 hover:bg-white/10"
+                      )}>
+                      {white.san}
+                      {white.comment && <span className="ml-0.5 text-[8px] text-orange-300">●</span>}
+                    </button>
+                    {black && (
+                      <button
+                        onClick={() => goTo((num - 1) * 2 + 1)}
+                        className={cn(
+                          "px-1.5 py-0.5 rounded text-[12px] font-mono transition-colors",
+                          moveIdx === (num - 1) * 2 + 1
+                            ? "bg-orange-500 text-white"
+                            : "text-white/70 hover:bg-white/10"
+                        )}>
+                        {black.san}
+                        {black.comment && <span className="ml-0.5 text-[8px] text-orange-300">●</span>}
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right: chapters + comments */}
+        <div className="w-[260px] shrink-0 border-l border-white/10 flex flex-col min-h-0">
+
+          {/* Chapters */}
+          <div className="shrink-0 border-b border-white/10">
+            <div className="px-4 py-3 flex items-center gap-2">
+              <BookOpen size={13} className="text-orange-400" />
+              <span className="text-[12px] font-bold text-white/70 uppercase tracking-wider">Chapters</span>
+            </div>
+            <div className="overflow-y-auto max-h-[200px]">
+              {chapters.map((ch, i) => (
+                <button key={i}
+                  onClick={() => { setChapterIdx(i); setMoveIdx(-1); }}
+                  className={cn(
+                    "w-full text-left px-4 py-2.5 text-[13px] transition-colors border-b border-white/5 last:border-0",
+                    i === chapterIdx
+                      ? "bg-orange-500/20 text-orange-300 font-bold"
+                      : "text-white/60 hover:bg-white/5 hover:text-white/80"
+                  )}>
+                  <span className="text-[10px] text-white/30 mr-1">{i + 1}.</span>
+                  {ch.title}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Comments */}
+          <div className="flex-1 min-h-0 flex flex-col">
+            <div className="px-4 py-3 flex items-center gap-2 border-b border-white/10 shrink-0">
+              <MessageSquare size={13} className="text-orange-400" />
+              <span className="text-[12px] font-bold text-white/70 uppercase tracking-wider">Comments</span>
+            </div>
+            <div ref={commentsRef} className="flex-1 overflow-y-auto p-3 space-y-2">
+              {chapter?.moves.map((m, i) => m.comment ? (
+                <div key={i}
+                  className={cn(
+                    "rounded-2xl px-3 py-2 text-[12px] leading-relaxed cursor-pointer transition-all",
+                    i === moveIdx
+                      ? "bg-orange-500/30 border border-orange-400/40 text-orange-100"
+                      : "bg-white/5 text-white/50 hover:bg-white/10"
+                  )}
+                  onClick={() => goTo(i)}>
+                  <span className="text-[10px] font-bold text-white/30 block mb-1">
+                    After {m.san}
+                  </span>
+                  {m.comment}
+                </div>
+              ) : null)}
+              {!chapter?.moves.some(m => m.comment) && (
+                <p className="text-[12px] text-white/25 text-center pt-4">No comments in this chapter</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── BatchHistoryDrawer ────────────────────────────────────────────────────────
+
+function BatchHistoryDrawer({ batch, studentId, onClose }) {
+  const [sessions,   setSessions]   = useState([]);
+  const [attMap,     setAttMap]     = useState({});  // date → { present }
+  const [loading,    setLoading]    = useState(true);
+  const [pdfTarget,  setPdfTarget]  = useState(null); // { pdfs, idx }
+  const [pgnTarget,  setPgnTarget]  = useState(null); // { pgn }
+
+  useEffect(() => {
+    if (!batch?.id) return;
+    Promise.all([
+      getClassSessionsByBatch(batch.id),
+      getAttendanceByBatch(batch.id),
+    ]).then(([sess, att]) => {
+      setSessions(sess);
+      const map = {};
+      att.filter(a => String(a.studentId) === String(studentId))
+         .forEach(a => { map[a.date] = a; });
+      setAttMap(map);
+      setLoading(false);
+    });
+  }, [batch?.id, studentId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function openNotes(session) {
+    // Load PGN data if needed
+    if (session.pgnIds?.length > 0) {
+      const pgns = await getPgnsByIds(session.pgnIds);
+      if (pgns.length > 0) {
+        setPgnTarget({ pgn: pgns[0] });
+        return;
+      }
+    }
+    if (session.pdfAttachments?.length > 0) {
+      setPdfTarget({ pdfs: session.pdfAttachments, idx: 0 });
+    }
+  }
+
+  const hasNotes = (s) => (s.pgnIds?.length > 0) || (s.pdfAttachments?.length > 0) || s.notes;
+
+  return (
+    <>
+      <AnimatePresence>
+        <motion.div
+          key="bh-overlay"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/40 z-[150]"
+          onClick={onClose}
+        />
+        <motion.aside
+          key="bh-drawer"
+          initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
+          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+          className="fixed right-0 top-0 bottom-0 w-full max-w-[640px] bg-white z-[160] flex flex-col shadow-2xl"
+          onClick={e => e.stopPropagation()}>
+
+          {/* Header */}
+          <div className="shrink-0 flex items-center justify-between px-6 py-5 border-b border-gray-100">
+            <div>
+              <h2 className="text-[17px] font-black text-gray-900">{batch?.name}</h2>
+              <p className="text-[12px] text-gray-400 mt-0.5">Session history & notes</p>
+            </div>
+            <button onClick={onClose}
+              className="w-9 h-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto">
+            {loading ? (
+              <div className="flex items-center justify-center py-20">
+                <span className="w-7 h-7 rounded-full border-2 border-gray-200 border-t-brand-500 animate-spin" />
+              </div>
+            ) : sessions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center px-8">
+                <CalendarDays size={36} className="text-gray-200 mb-3" />
+                <p className="text-[15px] font-bold text-gray-500">No sessions yet</p>
+                <p className="text-[13px] text-gray-400 mt-1">Sessions will appear here once your coach records them.</p>
+              </div>
+            ) : (
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50/60">
+                    <th className="text-left px-6 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Date</th>
+                    <th className="text-left px-4 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Topic</th>
+                    <th className="text-center px-4 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Attended</th>
+                    <th className="text-center px-4 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {sessions.map(s => {
+                    const att = attMap[s.date];
+                    const attended = att ? att.present : null;
+                    return (
+                      <tr key={s.id} className="hover:bg-gray-50/60 transition-colors">
+                        <td className="px-6 py-3.5 text-gray-600 font-medium whitespace-nowrap">
+                          {new Date(s.date + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        </td>
+                        <td className="px-4 py-3.5 text-gray-800 font-semibold max-w-[180px] truncate">
+                          {s.title || <span className="text-gray-300 font-normal">—</span>}
+                        </td>
+                        <td className="px-4 py-3.5 text-center">
+                          {attended === null ? (
+                            <span className="text-gray-300 text-[11px]">—</span>
+                          ) : attended ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold">
+                              <Check size={10} strokeWidth={3} />Yes
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[11px] font-bold">
+                              <X size={10} strokeWidth={3} />No
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5 text-center">
+                          {hasNotes(s) ? (
+                            <div className="flex items-center justify-center gap-1.5">
+                              {s.pgnIds?.length > 0 && (
+                                <button
+                                  onClick={() => openNotes(s)}
+                                  className="flex items-center gap-1 h-7 px-2.5 rounded-lg bg-brand-50 text-brand-600 hover:bg-brand-100 text-[11px] font-bold transition-colors">
+                                  <BookOpen size={11} />PGN
+                                </button>
+                              )}
+                              {s.pdfAttachments?.length > 0 && (
+                                <button
+                                  onClick={() => setPdfTarget({ pdfs: s.pdfAttachments, idx: 0 })}
+                                  className="flex items-center gap-1 h-7 px-2.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 text-[11px] font-bold transition-colors">
+                                  <FileText size={11} />PDF
+                                </button>
+                              )}
+                              {!s.pgnIds?.length && !s.pdfAttachments?.length && s.notes && (
+                                <span className="text-[12px] text-gray-500 italic max-w-[160px] truncate">{s.notes}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-300 text-[11px]">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </motion.aside>
+      </AnimatePresence>
+
+      {/* PDF Viewer */}
+      {pdfTarget && (
+        <PdfViewer
+          pdfs={pdfTarget.pdfs}
+          initialIndex={pdfTarget.idx}
+          onClose={() => setPdfTarget(null)}
+        />
+      )}
+
+      {/* PGN Viewer */}
+      {pgnTarget && (
+        <PgnViewer
+          pgn={pgnTarget.pgn}
+          onClose={() => setPgnTarget(null)}
+        />
+      )}
+    </>
+  );
+}
+
 // ── Student: read-only enrolled batches view ──────────────────────────────────
 
 function StudentBatchesView({ search }) {
-  const { user }   = useAuth();
-  const [batches,  setBatches]  = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [tab,      setTab]      = useState("batches");
+  const { user }          = useAuth();
+  const [batches,         setBatches]         = useState([]);
+  const [loading,         setLoading]         = useState(true);
+  const [selectedBatch,   setSelectedBatch]   = useState(null);
 
   useEffect(() => {
     getBatchesForStudent(user?.id).then(b => { setBatches(b); setLoading(false); });
@@ -1286,55 +1772,95 @@ function StudentBatchesView({ search }) {
   return (
     <div className="min-h-screen bg-[#f6f8fc]">
       <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
-        <div className="flex items-center border-b-2 border-gray-200 mb-7 gap-0">
-          {[["batches","My Batches"],["calendar","Schedule"]].map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={cn("relative px-5 py-3 text-[14px] font-bold transition-colors",
-                tab === id ? "text-brand-600" : "text-gray-400 hover:text-gray-600")}>
-              {label}
-              {tab === id && (
-                <motion.span layoutId="student-batch-tab"
-                  className="absolute bottom-[-2px] left-0 right-0 h-0.5 bg-brand-600 rounded-full" />
-              )}
-            </button>
-          ))}
+        <div className="mb-6">
+          <h2 className="text-[20px] font-black text-gray-900">My Batches</h2>
+          <p className="text-[12px] text-gray-400 mt-0.5">Classes you&apos;re enrolled in</p>
         </div>
 
-        {tab === "batches" && (
-          <>
-            <div className="mb-6">
-              <h2 className="text-[20px] font-black text-gray-900">My Batches</h2>
-              <p className="text-[12px] text-gray-400 mt-0.5">Classes you're enrolled in</p>
+        {filtered.length === 0 ? (
+          <div className="rounded-[28px] bg-white border border-gray-200 py-20 flex flex-col items-center text-center">
+            <div className="w-16 h-16 rounded-[20px] bg-brand-50 flex items-center justify-center mb-4">
+              <Users size={28} className="text-brand-400" />
             </div>
-            {filtered.length === 0 ? (
-              <div className="rounded-[28px] bg-white border border-gray-200 py-20 flex flex-col items-center text-center">
-                <div className="w-16 h-16 rounded-[20px] bg-brand-50 flex items-center justify-center mb-4">
-                  <Users size={28} className="text-brand-400" />
-                </div>
-                <h3 className="text-[16px] font-bold text-gray-800">Not enrolled yet</h3>
-                <p className="text-[13px] text-gray-400 mt-1.5 max-w-xs">
-                  Your coach will add you to a batch. Check back soon!
-                </p>
-              </div>
-            ) : (
-              <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
-                {filtered.map(b => (
-                  <BatchRow
-                    key={b.id}
-                    batch={b}
-                    studentCount={0}
-                    onDelete={() => {}}
-                    onClick={() => {}}
-                    canManage={false}
-                  />
-                ))}
-              </div>
-            )}
-          </>
+            <h3 className="text-[16px] font-bold text-gray-800">Not enrolled yet</h3>
+            <p className="text-[13px] text-gray-400 mt-1.5 max-w-xs">
+              Your coach will add you to a batch. Check back soon!
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filtered.map(b => (
+              <StudentBatchCard
+                key={b.id}
+                batch={b}
+                onClick={() => setSelectedBatch(b)}
+              />
+            ))}
+          </div>
         )}
-        {tab === "calendar" && (
-          <CalendarTab batches={batches} studentCounts={{}} />
+      </div>
+
+      {selectedBatch && (
+        <BatchHistoryDrawer
+          batch={selectedBatch}
+          studentId={user?.id}
+          onClose={() => setSelectedBatch(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function StudentBatchCard({ batch, onClick }) {
+  const sched = scheduleSummary(batch);
+  return (
+    <div
+      onClick={onClick}
+      className="group bg-white rounded-[20px] border border-gray-200 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer overflow-hidden">
+
+      {/* Color bar */}
+      <div className={cn("h-1.5 w-full", LEVEL_BAR[batch.level] || "bg-gray-300")} />
+
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className={cn("px-2 py-0.5 text-[10px] font-bold rounded-full border", LEVEL_CHIP[batch.level] || LEVEL_CHIP.Open)}>
+                {batch.level}
+              </span>
+            </div>
+            <h3 className="text-[15px] font-black text-gray-900 leading-tight truncate">{batch.name}</h3>
+          </div>
+        </div>
+
+        {batch.coach && (
+          <p className="text-[12px] text-gray-500 mb-2">
+            <span className="text-gray-400">Coach:</span> {batch.coach}
+          </p>
         )}
+        {sched && (
+          <p className="flex items-center gap-1 text-[12px] text-gray-500 mb-4">
+            <Clock size={11} className="shrink-0 text-gray-400" />{sched}
+          </p>
+        )}
+
+        <div className="flex items-center gap-2 mt-auto pt-1">
+          <button
+            onClick={e => { e.stopPropagation(); onClick(); }}
+            className="flex-1 h-8 rounded-xl bg-gray-50 border border-gray-200 text-[12px] font-bold text-gray-600 hover:bg-gray-100 transition-colors flex items-center justify-center gap-1">
+            <CalendarDays size={12} />View History
+          </button>
+          {batch.meetingLink && (
+            <a
+              href={batch.meetingLink}
+              target="_blank"
+              rel="noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="flex-1 h-8 rounded-xl bg-brand-500 text-white text-[12px] font-bold hover:bg-brand-600 transition-colors flex items-center justify-center gap-1">
+              <ExternalLink size={12} />Join
+            </a>
+          )}
+        </div>
       </div>
     </div>
   );

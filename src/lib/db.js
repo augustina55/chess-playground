@@ -177,6 +177,12 @@ export async function getPgns() {
   return (data || []).map(pgnFromDb)
 }
 
+export async function getPgnsByIds(ids) {
+  if (!ids || ids.length === 0) return []
+  const { data } = await db().from('pgns').select('*').in('id', ids)
+  return (data || []).map(pgnFromDb)
+}
+
 export async function createPgn(pgn, puzzles = []) {
   const { data, error } = await db()
     .from('pgns')
