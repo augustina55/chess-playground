@@ -300,8 +300,8 @@ function MyProfileTab({ onBack }) {
         {/* My Academies (coaches only) */}
         <MyAcademiesSection />
 
-        {/* Connected accounts */}
-        <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
+        {/* Connected accounts — hidden for academy role */}
+        {user?.role !== "academy" && <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100">
             <p className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">Connected Accounts</p>
           </div>
@@ -389,7 +389,7 @@ function MyProfileTab({ onBack }) {
               )}
             </div>
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Sign out */}

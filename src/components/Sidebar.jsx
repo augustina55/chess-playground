@@ -28,10 +28,10 @@ const NAV_SECTIONS = [
     label: "TOOLS",
     items: [
       { id: "home", icon: LayoutDashboard, label: "Dashboard" },
-      { id: "play", icon: Swords, label: "Play Chess" },
-      { id: "analyse", icon: Microscope, label: "Analyse" },
-      { id: "blitz-race", icon: Zap, label: "Blitz Race" },
-      { id: "activity", icon: Activity, label: "My Activity" },
+      { id: "play", icon: Swords, label: "Play Chess", roles: ["admin", "coach", "student"] },
+      { id: "analyse", icon: Microscope, label: "Analyse", roles: ["admin", "coach", "student"] },
+      { id: "blitz-race", icon: Zap, label: "Blitz Race", roles: ["admin", "coach", "student"] },
+      { id: "activity", icon: Activity, label: "My Activity", roles: ["admin", "coach", "student"] },
     ],
   },
   {

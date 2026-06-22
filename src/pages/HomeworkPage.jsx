@@ -6,7 +6,7 @@ import {
   Plus, BookOpen, ChevronLeft, Trash2, Calendar, User,
   Clock3, Layers3, FileText,
   Clock, Check, X, ArrowRight, ChevronRight, TrendingUp,
-  BarChart2, AlertCircle,
+  BarChart2, AlertCircle, Zap, Cpu,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { BOARD_THEMES } from "../lib/boardThemes";
@@ -49,6 +49,18 @@ function getCircleItems(total, current) {
   return items;
 }
 
+// ── Engine helpers ────────────────────────────────────────────────────────────
+
+const SF_CDN = "https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.min.js";
+
+function applyUci(fen, uci) {
+  try {
+    const g = new Chess(fen);
+    const m = g.move({ from: uci.slice(0,2), to: uci.slice(2,4), promotion: uci[4] || "q" });
+    return m ? { san: m.san, fen: g.fen(), over: g.isGameOver() } : null;
+  } catch { return null; }
+}
+
 // ── HW Player ─────────────────────────────────────────────────────────────────
 
 export function HWPlayer({ hw, onBack }) {
@@ -65,6 +77,181 @@ export function HWPlayer({ hw, onBack }) {
   const [submitting,     setSubmitting]     = useState(false);
   const [saveError,      setSaveError]      = useState(null);
   const posListRef = useRef(null);
+
+  // ── Engine Explore ──────────────────────────────────────────────────────────
+  const sfRef   = useRef(null);
+  const sfCbRef = useRef(null);
+  const expRef  = useRef({
+    active: false, phase: "idle",
+    startFen: null, firstUCI: null, firstSAN: null, afterFen: null,
+    topMoves: [], lineIdx: 0, lineHistory: [], completedLines: [], boardFen: null,
+  });
+  const [, setExpTick] = useState(0);
+  const redrawExp = () => setExpTick(t => t + 1);
+
+  useEffect(() => () => { sfRef.current?.worker.terminate(); sfRef.current = null; }, []);
+
+  function ensureSF() {
+    if (sfRef.current) return;
+    const blob = new Blob([`importScripts('${SF_CDN}')`], { type: "text/javascript" });
+    const w = new Worker(URL.createObjectURL(blob));
+    sfRef.current = { worker: w, ready: false, pending: null, moves: {} };
+    w.postMessage("uci");
+    w.onmessage = ({ data: msg }) => {
+      const sf = sfRef.current; if (!sf) return;
+      if (!sf.ready && msg.includes("uciok")) w.postMessage("isready");
+      if (msg.includes("readyok")) { sf.ready = true; sf.pending?.(); sf.pending = null; }
+      if (msg.startsWith("info") && msg.includes(" pv ")) {
+        const lM = msg.match(/multipv (\d+)/);
+        const cM = msg.match(/score cp (-?\d+)/);
+        const mM = msg.match(/score mate (-?\d+)/);
+        const pM = msg.match(/ pv (\S+)/);
+        if (pM) {
+          const k = lM ? parseInt(lM[1]) : 1;
+          sf.moves[k] = { move: pM[1], score: cM ? parseInt(cM[1]) : (mM ? (parseInt(mM[1]) > 0 ? 9999 : -9999) : 0) };
+        }
+      }
+      if (msg.startsWith("bestmove")) {
+        const res = { ...sf.moves }; sf.moves = {};
+        const cb = sfCbRef.current; sfCbRef.current = null; cb?.(res);
+      }
+    };
+  }
+
+  function sfAnalyze(fen, multiPV, depth, cb) {
+    ensureSF();
+    sfCbRef.current = cb;
+    sfRef.current.moves = {};
+    const go = () => {
+      sfRef.current.worker.postMessage("stop");
+      sfRef.current.worker.postMessage(`setoption name MultiPV value ${multiPV}`);
+      sfRef.current.worker.postMessage(`position fen ${fen}`);
+      sfRef.current.worker.postMessage(`go depth ${depth}`);
+    };
+    if (sfRef.current.ready) go(); else sfRef.current.pending = go;
+  }
+
+  function startExplore() {
+    const pzl = puzzles[idx];
+    if (!pzl || submissionsMap[pzl.id]) return;
+    Object.assign(expRef.current, {
+      active: true, phase: "await_first", startFen: pzl.fen, boardFen: pzl.fen,
+      firstUCI: null, firstSAN: null, afterFen: null,
+      topMoves: [], lineIdx: 0, lineHistory: [], completedLines: [],
+    });
+    redrawExp();
+  }
+
+  function stopExplore() {
+    sfRef.current?.worker.postMessage("stop");
+    sfCbRef.current = null;
+    expRef.current.active = false;
+    expRef.current.phase = "idle";
+    redrawExp();
+  }
+
+  function expStartLine(lineIdx) {
+    const e = expRef.current;
+    const engineMove = e.topMoves[lineIdx]?.move;
+    if (!engineMove) { e.phase = "done"; redrawExp(); return; }
+    const r = applyUci(e.afterFen, engineMove);
+    if (!r) { e.phase = "done"; redrawExp(); return; }
+    e.lineIdx = lineIdx;
+    e.lineHistory = [{ uci: engineMove, san: r.san, byEngine: true }];
+    e.boardFen = r.fen;
+    e.phase = r.over ? "engine_turn" : "in_line";
+    redrawExp();
+    if (r.over) setTimeout(() => expEndLine(), 400);
+  }
+
+  function expEndLine() {
+    const e = expRef.current;
+    e.completedLines.push({ firstSAN: e.firstSAN, history: [...e.lineHistory] });
+    e.lineHistory = [];
+    const next = e.lineIdx + 1;
+    if (next < Math.min(e.topMoves.length, 3)) {
+      e.phase = "transitioning"; redrawExp();
+      setTimeout(() => { e.boardFen = e.afterFen; redrawExp(); }, 400);
+      setTimeout(() => expStartLine(next), 900);
+    } else {
+      e.phase = "done"; redrawExp();
+    }
+  }
+
+  function handleExpFirstDrop({ sourceSquare: from, targetSquare: to }) {
+    const e = expRef.current;
+    if (e.phase !== "await_first") return false;
+    const r = applyUci(e.startFen, from + to);
+    if (!r) return false;
+    e.firstUCI = from + to; e.firstSAN = r.san;
+    e.afterFen = r.fen; e.boardFen = r.fen;
+    e.phase = "fetching"; redrawExp();
+    sfAnalyze(r.fen, 3, 15, (result) => {
+      const top = [1, 2, 3].map(k => result[k]).filter(Boolean);
+      e.topMoves = top;
+      if (!top.length) { e.phase = "done"; redrawExp(); return; }
+      setTimeout(() => expStartLine(0), 500);
+    });
+    return true;
+  }
+
+  function handleExpLineDrop({ sourceSquare: from, targetSquare: to }) {
+    const e = expRef.current;
+    if (e.phase !== "in_line") return false;
+    const r = applyUci(e.boardFen, from + to);
+    if (!r) return false;
+    const fenAfterStudent = r.fen;
+    e.lineHistory = [...e.lineHistory, { uci: from + to, san: r.san, byEngine: false }];
+    e.boardFen = fenAfterStudent;
+    if (e.lineHistory.length >= 4 || r.over) {
+      e.phase = "engine_turn"; redrawExp();
+      setTimeout(() => expEndLine(), 400);
+      return true;
+    }
+    e.phase = "engine_turn"; redrawExp();
+    sfAnalyze(fenAfterStudent, 1, 12, (result) => {
+      const mv = result[1]?.move;
+      const sc = result[1]?.score ?? 0;
+      if (!mv || Math.abs(sc) >= 400) { expEndLine(); return; }
+      setTimeout(() => {
+        const r2 = applyUci(fenAfterStudent, mv);
+        if (!r2) { expEndLine(); return; }
+        e.lineHistory = [...e.lineHistory, { uci: mv, san: r2.san, byEngine: true }];
+        e.boardFen = r2.fen;
+        if (e.lineHistory.length >= 4 || r2.over) {
+          e.phase = "engine_turn"; redrawExp();
+          setTimeout(() => expEndLine(), 400);
+        } else {
+          e.phase = "in_line"; redrawExp();
+        }
+      }, 600);
+    });
+    return true;
+  }
+
+  async function submitExplore() {
+    const pzl = puzzles[idx];
+    const e = expRef.current;
+    if (!pzl || !user?.id || submitting || e.completedLines.length < 2) return;
+    const firstLine = e.completedLines[0];
+    const uciMoves = [e.firstUCI, ...firstLine.history.map(h => h.uci)].filter(Boolean);
+    setSubmitting(true); setSaveError(null);
+    try {
+      await submitPuzzleAnswer(hw.id, user.id, pzl.id, uciMoves);
+      const newSub = { puzzleId: pzl.id, moves: uciMoves, correct: null, reviewed: false, submittedAt: new Date().toISOString() };
+      setSubmissionsMap(prev => {
+        const next = { ...prev, [pzl.id]: newSub };
+        const nextIdx = puzzles.findIndex((p, ii) => ii > idx && !next[p.id]);
+        if (nextIdx >= 0) setTimeout(() => loadPuzzle(nextIdx), 600);
+        return next;
+      });
+      stopExplore();
+    } catch (err) {
+      setSaveError(err?.message || "Failed to submit");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   function replayMoves(startFen, uciMoves) {
     let g = new Chess(startFen);
@@ -164,6 +351,9 @@ export function HWPlayer({ hw, onBack }) {
     }
   }
 
+  const e           = expRef.current;
+  const isExploring = e.active;
+
   const pzl        = puzzles[idx];
   const currentSub = pzl ? submissionsMap[pzl.id] : null;
   const total      = puzzles.length;
@@ -217,10 +407,14 @@ export function HWPlayer({ hw, onBack }) {
           <div style={{ width: "min(70%, calc(100vh - 140px))", maxWidth: "min(70%, calc(100vh - 140px))" }}>
             <div className="overflow-hidden rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
               <Chessboard options={{
-                position: boardFen,
+                position: isExploring ? (e.boardFen || e.startFen) : boardFen,
                 boardOrientation: orientation,
-                onPieceDrop: handleDrop,
-                allowDragging: puzzlesOk && !!pzl && !currentSub,
+                onPieceDrop: isExploring
+                  ? (e.phase === "await_first" ? handleExpFirstDrop : handleExpLineDrop)
+                  : handleDrop,
+                allowDragging: isExploring
+                  ? (e.phase === "await_first" || e.phase === "in_line")
+                  : (puzzlesOk && !!pzl && !currentSub),
                 darkSquareStyle:  { backgroundColor: boardTheme.dark },
                 lightSquareStyle: { backgroundColor: boardTheme.light },
                 boardStyle: { borderRadius: 0 },
@@ -232,107 +426,196 @@ export function HWPlayer({ hw, onBack }) {
         {/* Right panel */}
         <div className="w-[300px] shrink-0 flex flex-col gap-4 overflow-y-auto">
 
-          {/* Puzzle info / answer card */}
-          <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-5">
-            <div className="flex items-baseline gap-2 mb-4">
-              <span className="text-[15px] font-black text-gray-900">Puzzle {idx + 1}</span>
-              <span className="text-[12px] text-gray-400">of {total}</span>
-            </div>
+          {isExploring ? (
+            <>
+              {/* Explore status card */}
+              <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Zap size={14} className="text-orange-500" />
+                  <span className="text-[13px] font-black text-gray-800">Engine Exploration</span>
+                  <button onClick={stopExplore} className="ml-auto w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
+                    <X size={13} />
+                  </button>
+                </div>
 
-            {/* Moves display */}
-            <div className="min-h-[48px] mb-4">
-              {currentSub ? (
-                <div>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Your answer</p>
-                  <p className="font-mono text-[13px] text-gray-700">
-                    {submittedSan.length ? submittedSan.join(" ") : <span className="italic text-gray-400">(no moves)</span>}
-                  </p>
+                {/* Variation progress bars */}
+                <div className="flex gap-1.5 mb-3">
+                  {[0, 1, 2].map(i => (
+                    <div key={i} className={cn("flex-1 h-2 rounded-full transition-all",
+                      i < e.completedLines.length ? "bg-orange-400" :
+                      i === e.lineIdx && !["idle","await_first","fetching","done","transitioning"].includes(e.phase) ? "bg-orange-200" :
+                      "bg-gray-100")} />
+                  ))}
                 </div>
-              ) : movesUCI.length > 0 ? (
-                <div>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Your moves</p>
-                  <p className="font-mono text-[13px] text-gray-700">{movesSAN.join(" ")}</p>
+
+                <p className="text-[12px] font-medium text-gray-500">
+                  {e.phase === "await_first"   && "Make your first move on the board"}
+                  {e.phase === "fetching"      && "Engine analyzing 3 replies…"}
+                  {e.phase === "in_line"       && `Variation ${e.lineIdx + 1}/3 — your turn`}
+                  {e.phase === "engine_turn"   && <span className="flex items-center gap-1.5 text-indigo-500"><Cpu size={11} className="animate-pulse" />Engine thinking…</span>}
+                  {e.phase === "transitioning" && `Loading variation ${e.lineIdx + 2}…`}
+                  {e.phase === "done"          && <span className="text-emerald-600 font-bold">All variations explored!</span>}
+                </p>
+
+                {e.firstSAN && (
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <span className="text-[11px] text-gray-400">Your move:</span>
+                    <span className="px-2 py-0.5 rounded-lg bg-orange-100 text-orange-800 text-[12px] font-black">{e.firstSAN}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Current line in progress */}
+              {e.lineHistory.length > 0 && !["done","transitioning"].includes(e.phase) && (
+                <div className="bg-orange-50 border border-orange-100 rounded-[20px] p-4">
+                  <p className="text-[10px] font-bold text-orange-400 uppercase tracking-wide mb-2">Variation {e.lineIdx + 1} — in progress</p>
+                  <div className="flex flex-wrap gap-1">
+                    <span className="px-2 py-0.5 rounded-lg bg-orange-200 text-orange-900 text-[12px] font-black">{e.firstSAN}</span>
+                    {e.lineHistory.map((h, j) => (
+                      <span key={j} className={cn("px-2 py-0.5 rounded-lg text-[12px]",
+                        h.byEngine ? "bg-white border border-gray-200 text-gray-600 font-medium" : "bg-orange-200 text-orange-900 font-black")}>
+                        {h.san}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              ) : (
-                <p className="text-[13px] text-gray-400 italic">Make your move on the board…</p>
               )}
-            </div>
 
-            {/* Status / action */}
-            {currentSub ? (
-              currentSub.reviewed ? (
-                currentSub.correct ? (
-                  <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
-                    <Check size={16} className="text-emerald-600 shrink-0" strokeWidth={3} />
-                    <span className="text-[13px] font-bold text-emerald-700">Correct!</span>
+              {/* Completed variations */}
+              {e.completedLines.map((line, i) => (
+                <div key={i} className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-4">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-2">Variation {i + 1}</p>
+                  <div className="flex flex-wrap gap-1">
+                    <span className="px-2 py-0.5 rounded-lg bg-orange-100 text-orange-800 text-[12px] font-black">{line.firstSAN}</span>
+                    {line.history.map((h, j) => (
+                      <span key={j} className={cn("px-2 py-0.5 rounded-lg text-[12px]",
+                        h.byEngine ? "bg-gray-100 text-gray-600 font-medium" : "bg-orange-100 text-orange-800 font-black")}>
+                        {h.san}
+                      </span>
+                    ))}
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
-                    <X size={16} className="text-red-500 shrink-0" strokeWidth={3} />
-                    <span className="text-[13px] font-bold text-red-600">Wrong</span>
-                  </div>
-                )
-              ) : (
-                <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
-                  <Clock size={14} className="text-blue-500 shrink-0" />
-                  <span className="text-[12px] font-medium text-blue-700">Submitted — awaiting review</span>
                 </div>
-              )
-            ) : (
-              <div className="flex gap-2">
-                <button onClick={reset} disabled={movesUCI.length === 0}
-                  className="flex-1 h-10 rounded-xl border-2 border-gray-200 text-[12px] font-bold text-gray-600 hover:border-gray-300 disabled:opacity-40 transition-colors">
-                  Reset
-                </button>
-                <button onClick={submit} disabled={submitting || movesUCI.length === 0}
-                  className="flex-[2] h-10 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-bold disabled:opacity-40 transition-colors">
+              ))}
+
+              {/* Submit visible after 2+ variations */}
+              {e.completedLines.length >= 2 && (
+                <button onClick={submitExplore} disabled={submitting}
+                  className="w-full h-12 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[14px] font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-500/20">
                   {submitting ? "Submitting…" : "Submit Answer"}
                 </button>
-              </div>
-            )}
-          </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Puzzle info / answer card */}
+              <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-5">
+                <div className="flex items-baseline gap-2 mb-4">
+                  <span className="text-[15px] font-black text-gray-900">Puzzle {idx + 1}</span>
+                  <span className="text-[12px] text-gray-400">of {total}</span>
+                </div>
 
-          {/* Puzzle nav card */}
-          <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-5">
-            <p className="text-[12px] font-bold text-gray-500 mb-3">All Puzzles</p>
-            {!puzzlesOk ? (
-              <p className="text-[12px] text-gray-400">Loading…</p>
-            ) : (
-              <div ref={posListRef} className="flex flex-wrap gap-2 items-center mb-4">
-                {circleItems.map((item, ki) => {
-                  if (typeof item === "string") return <span key={item + ki} className="text-gray-300 font-bold px-0.5">...</span>;
-                  const pz  = puzzles[item];
-                  const sub = pz ? submissionsMap[pz.id] : null;
-                  const isCurrent = item === idx;
-                  return (
-                    <button key={item} data-idx={item} type="button" onClick={() => loadPuzzle(item)}
-                      className={cn(
-                        "w-9 h-9 rounded-full text-[12px] font-black transition-all flex items-center justify-center shrink-0",
-                        sub?.correct === true  ? "bg-emerald-500 text-white" :
-                        sub?.correct === false ? "bg-red-500 text-white" :
-                        sub                    ? "bg-blue-500 text-white" :
-                        isCurrent              ? "bg-gray-900 text-white" :
-                                                 "border-2 border-gray-200 text-gray-400 hover:border-gray-400 hover:text-gray-700"
-                      )}>
-                      {item + 1}
+                {/* Moves display */}
+                <div className="min-h-[48px] mb-4">
+                  {currentSub ? (
+                    <div>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Your answer</p>
+                      <p className="font-mono text-[13px] text-gray-700">
+                        {submittedSan.length ? submittedSan.join(" ") : <span className="italic text-gray-400">(no moves)</span>}
+                      </p>
+                    </div>
+                  ) : movesUCI.length > 0 ? (
+                    <div>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Your moves</p>
+                      <p className="font-mono text-[13px] text-gray-700">{movesSAN.join(" ")}</p>
+                    </div>
+                  ) : (
+                    <p className="text-[13px] text-gray-400 italic">Make your move on the board…</p>
+                  )}
+                </div>
+
+                {/* Status / action */}
+                {currentSub ? (
+                  currentSub.reviewed ? (
+                    currentSub.correct ? (
+                      <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                        <Check size={16} className="text-emerald-600 shrink-0" strokeWidth={3} />
+                        <span className="text-[13px] font-bold text-emerald-700">Correct!</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
+                        <X size={16} className="text-red-500 shrink-0" strokeWidth={3} />
+                        <span className="text-[13px] font-bold text-red-600">Wrong</span>
+                      </div>
+                    )
+                  ) : (
+                    <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
+                      <Clock size={14} className="text-blue-500 shrink-0" />
+                      <span className="text-[12px] font-medium text-blue-700">Submitted — awaiting review</span>
+                    </div>
+                  )
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <button onClick={reset} disabled={movesUCI.length === 0}
+                        className="flex-1 h-10 rounded-xl border-2 border-gray-200 text-[12px] font-bold text-gray-600 hover:border-gray-300 disabled:opacity-40 transition-colors">
+                        Reset
+                      </button>
+                      <button onClick={submit} disabled={submitting || movesUCI.length === 0}
+                        className="flex-[2] h-10 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-bold disabled:opacity-40 transition-colors">
+                        {submitting ? "Submitting…" : "Submit Answer"}
+                      </button>
+                    </div>
+                    <button onClick={startExplore}
+                      className="w-full h-10 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[12px] font-bold flex items-center justify-center gap-1.5 transition-colors">
+                      <Zap size={13} />Explore with Engine
                     </button>
-                  );
-                })}
+                  </div>
+                )}
               </div>
-            )}
-            <button type="button"
-              onClick={() => loadPuzzle(Math.min(idx + 1, puzzles.length - 1))}
-              disabled={idx >= puzzles.length - 1}
-              className="w-full h-12 rounded-2xl bg-[#f97316] hover:bg-[#ea6c00] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[14px] font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-orange-500/20">
-              Next <ArrowRight size={16} strokeWidth={2.5} />
-            </button>
-          </div>
 
-          {hw.notes && (
-            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
-              <p className="text-[11px] font-bold text-amber-700 mb-1 uppercase tracking-wide">Instructions</p>
-              <p className="text-[12px] text-amber-800 leading-relaxed">{hw.notes}</p>
-            </div>
+              {/* Puzzle nav card */}
+              <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-5">
+                <p className="text-[12px] font-bold text-gray-500 mb-3">All Puzzles</p>
+                {!puzzlesOk ? (
+                  <p className="text-[12px] text-gray-400">Loading…</p>
+                ) : (
+                  <div ref={posListRef} className="flex flex-wrap gap-2 items-center mb-4">
+                    {circleItems.map((item, ki) => {
+                      if (typeof item === "string") return <span key={item + ki} className="text-gray-300 font-bold px-0.5">...</span>;
+                      const pz  = puzzles[item];
+                      const sub = pz ? submissionsMap[pz.id] : null;
+                      const isCurrent = item === idx;
+                      return (
+                        <button key={item} data-idx={item} type="button" onClick={() => loadPuzzle(item)}
+                          className={cn(
+                            "w-9 h-9 rounded-full text-[12px] font-black transition-all flex items-center justify-center shrink-0",
+                            sub?.correct === true  ? "bg-emerald-500 text-white" :
+                            sub?.correct === false ? "bg-red-500 text-white" :
+                            sub                    ? "bg-blue-500 text-white" :
+                            isCurrent              ? "bg-gray-900 text-white" :
+                                                     "border-2 border-gray-200 text-gray-400 hover:border-gray-400 hover:text-gray-700"
+                          )}>
+                          {item + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <button type="button"
+                  onClick={() => loadPuzzle(Math.min(idx + 1, puzzles.length - 1))}
+                  disabled={idx >= puzzles.length - 1}
+                  className="w-full h-12 rounded-2xl bg-[#f97316] hover:bg-[#ea6c00] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[14px] font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-orange-500/20">
+                  Next <ArrowRight size={16} strokeWidth={2.5} />
+                </button>
+              </div>
+
+              {hw.notes && (
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+                  <p className="text-[11px] font-bold text-amber-700 mb-1 uppercase tracking-wide">Instructions</p>
+                  <p className="text-[12px] text-amber-800 leading-relaxed">{hw.notes}</p>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
