@@ -810,16 +810,17 @@ export async function upsertAttendance(records) {
 
 function sessionFromDb(row) {
   return {
-    id:        row.id,
-    batchId:   row.batch_id,
-    batchName: row.batch_name,
-    academyId: row.academy_id,
-    date:      row.date,
-    title:     row.title     || '',
-    notes:     row.notes     || '',
-    pgnIds:    row.pgn_ids   || [],
-    createdBy: row.created_by,
-    createdAt: row.created_at,
+    id:             row.id,
+    batchId:        row.batch_id,
+    batchName:      row.batch_name,
+    academyId:      row.academy_id,
+    date:           row.date,
+    title:          row.title            || '',
+    notes:          row.notes            || '',
+    pgnIds:         row.pgn_ids          || [],
+    pdfAttachments: row.pdf_attachments  || [],
+    createdBy:      row.created_by,
+    createdAt:      row.created_at,
   }
 }
 
@@ -854,18 +855,19 @@ export async function getClassSessionByBatchDate(batchId, date) {
   return data ? sessionFromDb(data) : null
 }
 
-export async function createClassSession({ batchId, batchName, academyId, date, title, notes, pgnIds, createdBy }) {
+export async function createClassSession({ batchId, batchName, academyId, date, title, notes, pgnIds, pdfAttachments, createdBy }) {
   const { data, error } = await db()
     .from('class_sessions')
     .insert({
-      batch_id:   batchId,
-      batch_name: batchName,
-      academy_id: academyId,
+      batch_id:        batchId,
+      batch_name:      batchName,
+      academy_id:      academyId,
       date,
-      title:      title      || null,
-      notes:      notes      || null,
-      pgn_ids:    pgnIds     || [],
-      created_by: createdBy  || null,
+      title:           title           || null,
+      notes:           notes           || null,
+      pgn_ids:         pgnIds          || [],
+      pdf_attachments: pdfAttachments  || [],
+      created_by:      createdBy       || null,
     })
     .select()
     .single()
@@ -873,12 +875,13 @@ export async function createClassSession({ batchId, batchName, academyId, date, 
   return sessionFromDb(data)
 }
 
-export async function updateClassSession(id, { title, notes, pgnIds, date }) {
+export async function updateClassSession(id, { title, notes, pgnIds, pdfAttachments, date }) {
   const patch = {}
-  if (title    !== undefined) patch.title   = title
-  if (notes    !== undefined) patch.notes   = notes
-  if (pgnIds   !== undefined) patch.pgn_ids = pgnIds
-  if (date     !== undefined) patch.date    = date
+  if (title          !== undefined) patch.title           = title
+  if (notes          !== undefined) patch.notes           = notes
+  if (pgnIds         !== undefined) patch.pgn_ids         = pgnIds
+  if (pdfAttachments !== undefined) patch.pdf_attachments = pdfAttachments
+  if (date           !== undefined) patch.date            = date
   const { data, error } = await db()
     .from('class_sessions')
     .update(patch)

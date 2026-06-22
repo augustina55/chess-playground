@@ -245,3 +245,5 @@ create table if not exists class_sessions (
 create index if not exists class_sessions_batch_id_idx  on class_sessions(batch_id);
 create index if not exists class_sessions_academy_id_idx on class_sessions(academy_id);
 create index if not exists class_sessions_date_idx       on class_sessions(date desc);
+
+alter table class_sessions add column if not exists pdf_attachments jsonb default '[]';

@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Users, Trash2, X, Link2, CalendarDays,
   ChevronLeft, ChevronRight, Clock, Search,
-  UserPlus, UserMinus, Check,
+  UserPlus, UserMinus, Check, FileText, Upload, Download,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/utils";
@@ -12,6 +12,9 @@ import {
   getBatchStudents, addStudentToBatch, removeStudentFromBatch, getBatchStudentCounts,
   getProfilesByAcademy, getProfiles, getAcademies, getBatchesForStudent,
   getAcademyInvitations,
+  upsertAttendance, getAttendanceByBatchDate,
+  getClassSessionByBatchDate, createClassSession, updateClassSession,
+  getPgns, createPgn,
 } from "../lib/db";
 
 // ── constants ──────────────────────────────────────────────────────────────────
@@ -616,15 +619,366 @@ function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, a
   );
 }
 
+// ── StudentToggle (for ClassSessionDrawer attendance) ─────────────────────────
+
+function StudentToggle({ student, present, onChange }) {
+  return (
+    <div className={cn(
+      "flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all",
+      present === true  ? "bg-emerald-50 border-emerald-200" :
+      present === false ? "bg-red-50 border-red-200"         : "bg-white border-gray-200"
+    )}>
+      <div className={cn(
+        "w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-black shrink-0 transition-colors",
+        present === true  ? "bg-emerald-500 text-white" :
+        present === false ? "bg-red-400 text-white"     : "bg-gray-200 text-gray-600"
+      )}>
+        {student.avatar || student.name?.[0]?.toUpperCase()}
+      </div>
+      <p className="flex-1 text-[13px] font-bold text-gray-900 truncate">{student.name}</p>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <button type="button" onClick={() => onChange(student.id, true)}
+          className={cn("w-8 h-8 rounded-xl border flex items-center justify-center transition-all",
+            present === true ? "bg-emerald-500 text-white border-emerald-500"
+              : "bg-white text-gray-400 border-gray-200 hover:border-emerald-400 hover:text-emerald-500")}>
+          <Check size={13} />
+        </button>
+        <button type="button" onClick={() => onChange(student.id, false)}
+          className={cn("w-8 h-8 rounded-xl border flex items-center justify-center transition-all",
+            present === false ? "bg-red-400 text-white border-red-400"
+              : "bg-white text-gray-400 border-gray-200 hover:border-red-300 hover:text-red-400")}>
+          <X size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── ClassSessionDrawer ────────────────────────────────────────────────────────
+
+function ClassSessionDrawer({ open, batch, date, academyId, onClose }) {
+  const dateStr = date ? `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}` : null;
+  const dateLabel = date ? date.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : "";
+
+  const [tab,            setTab]            = useState("attendance");
+  const [students,       setStudents]       = useState([]);
+  const [present,        setPresent]        = useState({});
+  const [session,        setSession]        = useState(null);
+  const [form,           setForm]           = useState({ title: "", notes: "", pgnIds: [], pdfAttachments: [] });
+  const [pgns,           setPgns]           = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [saving,         setSaving]         = useState(false);
+  const [saved,          setSaved]          = useState(false);
+  const pgnFileRef = useRef(null);
+  const pdfFileRef = useRef(null);
+
+  useEffect(() => {
+    if (!open || !batch || !dateStr) return;
+    setLoading(true);
+    setSaved(false);
+    setTab("attendance");
+    Promise.all([
+      getBatchStudents(batch.id),
+      getAttendanceByBatchDate(batch.id, dateStr),
+      getClassSessionByBatchDate(batch.id, dateStr),
+      getPgns(),
+    ]).then(([sts, att, sess, allPgns]) => {
+      setStudents(sts);
+      const map = {};
+      att.forEach(a => { map[a.studentId] = a.present; });
+      setPresent(map);
+      setSession(sess);
+      setForm({
+        title:          sess?.title          || "",
+        notes:          sess?.notes          || "",
+        pgnIds:         sess?.pgnIds         || [],
+        pdfAttachments: sess?.pdfAttachments || [],
+      });
+      setPgns(allPgns);
+      setLoading(false);
+    });
+  }, [open, batch?.id, dateStr]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleSave() {
+    if (!batch || !dateStr) return;
+    setSaving(true);
+    try {
+      if (students.length > 0) {
+        const records = students.map(s => ({
+          batch_id:  batch.id,
+          student_id: s.id,
+          date:      dateStr,
+          present:   present[s.id] !== undefined ? present[s.id] : true,
+          academy_id: academyId || null,
+        }));
+        await upsertAttendance(records);
+      }
+      const payload = { batchId: batch.id, batchName: batch.name, academyId, date: dateStr, ...form };
+      if (session?.id) {
+        const updated = await updateClassSession(session.id, payload);
+        setSession(updated);
+      } else {
+        const created = await createClassSession(payload);
+        setSession(created);
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      console.error("Save session failed:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handlePgnFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async ev => {
+      const content = ev.target.result;
+      const name = file.name.replace(/\.pgn$/i, "");
+      const id = `PGN-${Date.now()}`;
+      try {
+        const created = await createPgn({ id, name, type: "class", content }, []);
+        setPgns(prev => [...prev, created]);
+        setForm(f => ({ ...f, pgnIds: [...f.pgnIds, created.id] }));
+      } catch (err) { console.error("PGN upload failed:", err); }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  function handlePdfFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert("PDF must be under 5 MB"); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      setForm(f => ({
+        ...f,
+        pdfAttachments: [...f.pdfAttachments, { name: file.name, data: ev.target.result, size: file.size }],
+      }));
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  const presentCount = students.filter(s => present[s.id] === true).length;
+  const absentCount  = students.filter(s => present[s.id] === false).length;
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex justify-end"
+        >
+          <motion.aside
+            initial={{ x: 560 }} animate={{ x: 0 }} exit={{ x: 560 }}
+            transition={{ type: "spring", stiffness: 300, damping: 34 }}
+            className="w-full max-w-[520px] bg-[#f6f8fc] h-full flex flex-col overflow-hidden shadow-2xl"
+          >
+            {/* Header */}
+            <div className="shrink-0 bg-white border-b border-gray-200 px-6 pt-5 pb-4">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-500 mb-0.5">{dateLabel}</p>
+                  <h2 className="text-[17px] font-black text-gray-900 truncate">{batch?.name}</h2>
+                  {(batch?.coach || batch?.level) && (
+                    <p className="text-[12px] text-gray-400 mt-0.5">{[batch.coach, batch.level].filter(Boolean).join(" · ")}</p>
+                  )}
+                </div>
+                <button onClick={onClose}
+                  className="w-9 h-9 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex items-center justify-center transition-colors shrink-0 mt-1">
+                  <X size={17} />
+                </button>
+              </div>
+              {/* Tabs */}
+              <div className="flex gap-0 border-b -mb-[1px]">
+                {[["attendance","Attendance"],["session","Notes & Files"]].map(([id, label]) => (
+                  <button key={id} onClick={() => setTab(id)}
+                    className={cn("relative px-4 py-2.5 text-[13px] font-bold transition-colors",
+                      tab === id ? "text-brand-600" : "text-gray-400 hover:text-gray-600")}>
+                    {label}
+                    {tab === id && (
+                      <span className="absolute bottom-[-1px] left-0 right-0 h-0.5 bg-brand-600 rounded-t-full" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Body */}
+            {loading ? (
+              <div className="flex-1 flex items-center justify-center">
+                <span className="w-7 h-7 rounded-full border-2 border-brand-300 border-t-brand-600 animate-spin" />
+              </div>
+            ) : tab === "attendance" ? (
+              <div className="flex-1 overflow-y-auto px-5 py-5 space-y-2.5">
+                {students.length > 0 && (
+                  <div className="flex items-center gap-4 mb-3 px-1">
+                    <span className="flex items-center gap-1.5 text-[12px] font-bold text-emerald-600">
+                      <Check size={12} strokeWidth={3} />{presentCount} present
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[12px] font-bold text-red-500">
+                      <X size={12} strokeWidth={2.5} />{absentCount} absent
+                    </span>
+                    <button type="button" onClick={() => {
+                        const m = {};
+                        students.forEach(s => { m[s.id] = true; });
+                        setPresent(m);
+                      }}
+                      className="ml-auto text-[11px] font-bold text-brand-600 hover:underline">
+                      Mark all present
+                    </button>
+                  </div>
+                )}
+                {students.length === 0 ? (
+                  <div className="py-14 flex flex-col items-center text-center">
+                    <Users size={32} className="text-gray-200 mb-3" />
+                    <p className="text-[14px] font-bold text-gray-400">No students in this batch</p>
+                    <p className="text-[12px] text-gray-400 mt-1">Add students via Batch management.</p>
+                  </div>
+                ) : students.map(s => (
+                  <StudentToggle key={s.id} student={s} present={present[s.id]} onChange={(id, val) => setPresent(prev => ({ ...prev, [id]: val }))} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto px-5 py-5 space-y-7">
+                {/* Session title + notes */}
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 px-1">Session</p>
+                  <input
+                    className="w-full h-11 rounded-2xl border border-gray-200 bg-white px-4 text-[13px] text-gray-800 placeholder:text-gray-400 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
+                    placeholder="Session title (e.g. Endgame Techniques)"
+                    value={form.title}
+                    onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                  />
+                  <textarea
+                    rows={5}
+                    className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-800 placeholder:text-gray-400 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all resize-none"
+                    placeholder="Topics covered, key ideas, homework reminders…"
+                    value={form.notes}
+                    onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                  />
+                </div>
+
+                {/* PGN files */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between px-1">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">PGN Files</p>
+                    <button type="button" onClick={() => pgnFileRef.current?.click()}
+                      className="flex items-center gap-1.5 text-[11px] font-bold text-brand-600 hover:text-brand-700 transition-colors">
+                      <Upload size={11} />Upload PGN
+                    </button>
+                    <input ref={pgnFileRef} type="file" accept=".pgn" className="hidden" onChange={handlePgnFile} />
+                  </div>
+                  {pgns.length === 0 ? (
+                    <p className="text-[12px] text-gray-400 px-1">No PGNs yet — upload one above.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {pgns.map(pgn => {
+                        const sel = form.pgnIds.includes(pgn.id);
+                        return (
+                          <button key={pgn.id} type="button"
+                            onClick={() => setForm(f => ({
+                              ...f,
+                              pgnIds: sel ? f.pgnIds.filter(p => p !== pgn.id) : [...f.pgnIds, pgn.id],
+                            }))}
+                            className={cn("w-full flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-all text-left",
+                              sel ? "border-brand-500 bg-brand-50" : "border-gray-100 bg-white hover:border-gray-200")}>
+                            <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center shrink-0",
+                              sel ? "bg-brand-500" : "bg-gray-100")}>
+                              <FileText size={13} className={sel ? "text-white" : "text-gray-400"} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[13px] font-bold text-gray-800 truncate">{pgn.name}</p>
+                              {pgn.puzzleCount > 0 && <p className="text-[10px] text-gray-400">{pgn.puzzleCount} puzzles</p>}
+                            </div>
+                            {sel && <Check size={13} className="text-brand-500 shrink-0" strokeWidth={3} />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* PDF attachments */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between px-1">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">PDF Attachments</p>
+                    <button type="button" onClick={() => pdfFileRef.current?.click()}
+                      className="flex items-center gap-1.5 text-[11px] font-bold text-brand-600 hover:text-brand-700 transition-colors">
+                      <Upload size={11} />Attach PDF
+                    </button>
+                    <input ref={pdfFileRef} type="file" accept=".pdf" className="hidden" onChange={handlePdfFile} />
+                  </div>
+                  {form.pdfAttachments.length === 0 ? (
+                    <p className="text-[12px] text-gray-400 px-1">No PDFs attached.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {form.pdfAttachments.map((pdf, i) => (
+                        <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-white border border-gray-100">
+                          <div className="w-8 h-8 rounded-xl bg-red-50 flex items-center justify-center shrink-0">
+                            <FileText size={13} className="text-red-500" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] font-bold text-gray-800 truncate">{pdf.name}</p>
+                            <p className="text-[10px] text-gray-400">{(pdf.size / 1024).toFixed(0)} KB</p>
+                          </div>
+                          <a href={pdf.data} download={pdf.name}
+                            className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors text-gray-500 shrink-0"
+                            title="Download">
+                            <Download size={13} />
+                          </a>
+                          <button type="button"
+                            onClick={() => setForm(f => ({ ...f, pdfAttachments: f.pdfAttachments.filter((_, j) => j !== i) }))}
+                            className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-red-50 hover:text-red-500 transition-colors text-gray-400 shrink-0">
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="shrink-0 px-5 py-5 bg-white border-t border-gray-200 flex gap-3">
+              <button type="button" onClick={onClose}
+                className="flex-1 h-12 rounded-2xl border border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition-colors text-[13px]">
+                Close
+              </button>
+              <button type="button" onClick={handleSave} disabled={saving}
+                className={cn("flex-[2] h-12 rounded-2xl font-bold text-[14px] flex items-center justify-center gap-2 transition-all",
+                  saved ? "bg-emerald-500 text-white" : "bg-[#1a140f] hover:bg-[#2a201a] text-white",
+                  saving && "opacity-60 cursor-wait")}>
+                {saving ? (
+                  <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                ) : saved ? (
+                  <><Check size={14} strokeWidth={3} />Saved</>
+                ) : "Save Session"}
+              </button>
+            </div>
+          </motion.aside>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 // ── Calendar views ─────────────────────────────────────────────────────────────
 
-function BatchChip({ batch, date }) {
+function BatchChip({ batch, date, onClick }) {
   const jsDay = date.getDay();
   const dayVal = DAYS.find(d => d.js === jsDay)?.value;
   const time = batch.times?.[dayVal];
   return (
     <div title={`${batch.name}${time ? " · " + fmtTime(time) : ""}`}
-      className={cn("px-1.5 py-0.5 rounded-md text-[10px] font-semibold truncate leading-tight",
+      onClick={onClick}
+      className={cn("px-1.5 py-0.5 rounded-md text-[10px] font-semibold truncate leading-tight cursor-pointer hover:opacity-75 transition-opacity",
         LEVEL_CAL[batch.level] || "bg-brand-100 text-brand-700")}>
       {time && <span className="opacity-60 mr-0.5">{fmtTime(time)}</span>}
       {batch.name}
@@ -632,7 +986,7 @@ function BatchChip({ batch, date }) {
   );
 }
 
-function MonthView({ cursor, batches }) {
+function MonthView({ cursor, batches, onBatchClick }) {
   const today = new Date();
   const grid  = getMonthGrid(cursor.getFullYear(), cursor.getMonth());
 
@@ -663,7 +1017,7 @@ function MonthView({ cursor, batches }) {
                 {date.getDate()}
               </span>
               <div className="space-y-0.5">
-                {items.slice(0, 2).map(b => <BatchChip key={b.id} batch={b} date={date} />)}
+                {items.slice(0, 2).map(b => <BatchChip key={b.id} batch={b} date={date} onClick={() => onBatchClick(b, date)} />)}
                 {items.length > 2 && (
                   <p className="text-[9px] text-gray-400 pl-0.5">+{items.length - 2} more</p>
                 )}
@@ -676,7 +1030,7 @@ function MonthView({ cursor, batches }) {
   );
 }
 
-function WeekView({ cursor, batches }) {
+function WeekView({ cursor, batches, onBatchClick }) {
   const today = new Date();
   const week  = getWeekGrid(cursor);
   const cols  = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -706,7 +1060,8 @@ function WeekView({ cursor, batches }) {
                   const dv    = DAYS.find(d => d.js === jsDay)?.value;
                   const time  = b.times?.[dv];
                   return (
-                    <div key={b.id} className={cn("rounded-xl p-2", LEVEL_CAL[b.level] || "bg-brand-100 text-brand-700")}>
+                    <div key={b.id} onClick={() => onBatchClick(b, date)}
+                      className={cn("rounded-xl p-2 cursor-pointer hover:opacity-80 transition-opacity", LEVEL_CAL[b.level] || "bg-brand-100 text-brand-700")}>
                       {time && <p className="text-[10px] font-bold opacity-70 mb-0.5">{fmtTime(time)}</p>}
                       <p className="text-[11px] font-bold truncate leading-tight">{b.name}</p>
                     </div>
@@ -721,7 +1076,7 @@ function WeekView({ cursor, batches }) {
   );
 }
 
-function DayView({ cursor, batches, studentCounts }) {
+function DayView({ cursor, batches, studentCounts, onBatchClick }) {
   const jsDay = cursor.getDay();
   const dv    = DAYS.find(d => d.js === jsDay)?.value;
   const items = batchesForDate(batches, cursor).sort((a, b) => {
@@ -742,7 +1097,8 @@ function DayView({ cursor, batches, studentCounts }) {
           {items.map(b => {
             const time = b.times?.[dv];
             return (
-              <div key={b.id} className="flex items-center gap-4 px-6 py-5">
+              <div key={b.id} onClick={() => onBatchClick(b, cursor)}
+                className="flex items-center gap-4 px-6 py-5 cursor-pointer hover:bg-gray-50 transition-colors">
                 <div className="w-20 shrink-0">
                   <p className="text-[14px] font-black text-gray-700">{time ? fmtTime(time) : "—"}</p>
                 </div>
@@ -756,6 +1112,7 @@ function DayView({ cursor, batches, studentCounts }) {
                 </span>
                 {b.meetingLink && (
                   <a href={b.meetingLink} target="_blank" rel="noreferrer"
+                    onClick={e => e.stopPropagation()}
                     className="shrink-0 w-8 h-8 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center hover:bg-brand-100 transition-colors">
                     <Link2 size={13} />
                   </a>
@@ -769,10 +1126,11 @@ function DayView({ cursor, batches, studentCounts }) {
   );
 }
 
-function CalendarTab({ batches, studentCounts }) {
-  const [viewMode, setViewMode] = useState("month");
-  const [cursor, setCursor]     = useState(new Date());
-  const [coachFilter, setCoach] = useState("all");
+function CalendarTab({ batches, studentCounts, academyId }) {
+  const [viewMode,       setViewMode]       = useState("month");
+  const [cursor,         setCursor]         = useState(new Date());
+  const [coachFilter,    setCoach]          = useState("all");
+  const [sessionTarget,  setSessionTarget]  = useState(null);
 
   const coaches = useMemo(() => [...new Set(batches.map(b => b.coach).filter(Boolean))], [batches]);
 
@@ -835,9 +1193,17 @@ function CalendarTab({ batches, studentCounts }) {
         </button>
       </div>
 
-      {viewMode === "month" && <MonthView cursor={cursor} batches={visible} />}
-      {viewMode === "week"  && <WeekView  cursor={cursor} batches={visible} />}
-      {viewMode === "day"   && <DayView   cursor={cursor} batches={visible} studentCounts={studentCounts} />}
+      {viewMode === "month" && <MonthView cursor={cursor} batches={visible} onBatchClick={(b, d) => setSessionTarget({ batch: b, date: d })} />}
+      {viewMode === "week"  && <WeekView  cursor={cursor} batches={visible} onBatchClick={(b, d) => setSessionTarget({ batch: b, date: d })} />}
+      {viewMode === "day"   && <DayView   cursor={cursor} batches={visible} studentCounts={studentCounts} onBatchClick={(b, d) => setSessionTarget({ batch: b, date: d })} />}
+
+      <ClassSessionDrawer
+        open={!!sessionTarget}
+        batch={sessionTarget?.batch}
+        date={sessionTarget?.date}
+        academyId={academyId}
+        onClose={() => setSessionTarget(null)}
+      />
     </>
   );
 }
@@ -1021,7 +1387,7 @@ function CoachAdminBatchesView({ search }) {
           />
         )}
         {tab === "calendar" && (
-          <CalendarTab batches={batches} studentCounts={studentCounts} />
+          <CalendarTab batches={batches} studentCounts={studentCounts} academyId={academyId} />
         )}
       </div>
     </div>
