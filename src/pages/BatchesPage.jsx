@@ -6,7 +6,7 @@ import {
   Plus, Users, Trash2, X, Link2, CalendarDays,
   ChevronLeft, ChevronRight, Clock, Search,
   UserPlus, UserMinus, Check, FileText, Upload, Download,
-  ChevronDown, MessageSquare, BookOpen, ExternalLink,
+  ChevronDown, BookOpen, ExternalLink,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/utils";
@@ -1264,14 +1264,172 @@ function CalendarTab({ batches, studentCounts, academyId }) {
   );
 }
 
-// ── PGN parser helpers ────────────────────────────────────────────────────────
+// ── PGN parser with full variation tree ──────────────────────────────────────
+
+const NAG_GLYPHS = {
+  1:'!', 2:'?', 3:'!!', 4:'??', 5:'!?', 6:'?!',
+  10:'=', 14:'⩲', 15:'⩳', 16:'±', 17:'∓', 18:'+-', 19:'-+',
+};
+
+function nagGlyph(nags) {
+  return (nags || []).map(n => NAG_GLYPHS[n] || '').join('');
+}
+
+function fenSide(fen)      { return fen.split(' ')[1]; }
+function fenMoveNum(fen)   { return parseInt(fen.split(' ')[5] || '1'); }
+
+function tokenizePgn(text) {
+  const toks = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (' \t\n\r'.includes(ch)) { i++; continue; }
+    if (ch === '{') {
+      const end = text.indexOf('}', i + 1);
+      if (end === -1) break;
+      toks.push({ t: 'comment', v: text.slice(i + 1, end) });
+      i = end + 1; continue;
+    }
+    if (ch === ';') {
+      let j = i + 1; while (j < text.length && text[j] !== '\n') j++;
+      const v = text.slice(i + 1, j).trim(); if (v) toks.push({ t: 'comment', v });
+      i = j; continue;
+    }
+    if (ch === '(') { toks.push({ t: 'vs' }); i++; continue; }
+    if (ch === ')') { toks.push({ t: 've' }); i++; continue; }
+    if (ch === '$') {
+      let j = i + 1; while (j < text.length && /\d/.test(text[j])) j++;
+      toks.push({ t: 'nag', v: parseInt(text.slice(i + 1, j) || '0') });
+      i = j; continue;
+    }
+    let j = i;
+    while (j < text.length && !' \t\n\r{}();$'.includes(text[j])) j++;
+    const s = text.slice(i, j); i = j;
+    if (!s) continue;
+    if (['1-0','0-1','1/2-1/2','*'].includes(s)) { toks.push({ t: 'result' }); continue; }
+    if (/^\d+\.+$/.test(s) || /^\d+\.\.\.$/.test(s)) continue; // move numbers
+    toks.push({ t: 'move', v: s });
+  }
+  return toks;
+}
+
+function applyAnnot(node, raw) {
+  const arrows = [];
+  const sqStyles = {};
+  const COLORS = { G: 'rgba(0,180,0,', R: 'rgba(210,30,30,', B: 'rgba(30,30,210,', Y: 'rgba(200,190,0,' };
+  ;[...raw.matchAll(/\[%cal ([^\]]+)\]/g)].forEach(m =>
+    m[1].split(',').forEach(a => {
+      const c = COLORS[a[0]]; const fr = a.slice(1,3); const to = a.slice(3,5);
+      if (c && fr.length === 2 && to.length === 2) arrows.push([fr, to, c + '0.85)']);
+    })
+  );
+  ;[...raw.matchAll(/\[%csl ([^\]]+)\]/g)].forEach(m =>
+    m[1].split(',').forEach(s => {
+      const c = COLORS[s[0]]; const sq = s.slice(1);
+      if (c && sq.length === 2) sqStyles[sq] = { backgroundColor: c + '0.45)' };
+    })
+  );
+  node.arrows    = arrows;
+  node.sqStyles  = sqStyles;
+  node.comment   = raw.replace(/\[%[^\]]*\]/g, '').trim() || null;
+}
+
+let _nid = 0;
+
+function buildTree(toks, pos, chess, seq, branchNode, depth, nmap) {
+  while (pos < toks.length) {
+    const tok = toks[pos];
+    if (tok.t === 've' || tok.t === 'result') return pos;
+
+    if (tok.t === 'comment') {
+      if (seq.length > 0) applyAnnot(seq[seq.length - 1], tok.v);
+      pos++; continue;
+    }
+    if (tok.t === 'nag') {
+      if (seq.length > 0) seq[seq.length - 1].nags.push(tok.v);
+      pos++; continue;
+    }
+    if (tok.t === 'vs') {
+      if (seq.length > 0) {
+        const bn = seq[seq.length - 1];
+        const varSeq = [];
+        const vc = new Chess(bn.parentFen);
+        pos = buildTree(toks, pos + 1, vc, varSeq, bn, depth + 1, nmap);
+        // link: first var node's prev = node BEFORE branch in parent
+        for (let k = 0; k < varSeq.length; k++) {
+          varSeq[k].prevNode = k === 0 ? bn.prevNode : varSeq[k - 1];
+          if (k < varSeq.length - 1) varSeq[k].nextNode = varSeq[k + 1];
+        }
+        bn.variations.push(varSeq);
+        pos++; // skip 've'
+      } else {
+        let d = 1; pos++;
+        while (pos < toks.length && d > 0) {
+          if (toks[pos].t === 'vs') d++; if (toks[pos].t === 've') d--;
+          pos++;
+        }
+      }
+      continue;
+    }
+    if (tok.t === 'move') {
+      const parentFen = chess.fen();
+      let mv; try { mv = chess.move(tok.v); } catch { pos++; continue; }
+      if (!mv) { pos++; continue; }
+      const prev = seq.length > 0 ? seq[seq.length - 1] : null;
+      const node = {
+        id: ++_nid,
+        san:        mv.san,
+        fen:        chess.fen(),
+        parentFen,
+        color:      fenSide(parentFen),
+        fullMove:   fenMoveNum(parentFen),
+        comment:    null,
+        nags:       [],
+        arrows:     [],
+        sqStyles:   {},
+        variations: [],
+        seqRef:     seq,
+        seqIdx:     seq.length,
+        depth,
+        prevNode:   prev,
+        nextNode:   null,
+      };
+      if (prev) prev.nextNode = node;
+      nmap[node.id] = node;
+      seq.push(node);
+      pos++; continue;
+    }
+    pos++;
+  }
+  return pos;
+}
+
+function parseGameTree(pgnContent) {
+  try {
+    const evM  = pgnContent.match(/\[Event\s+"([^"]+)"\]/);
+    const whM  = pgnContent.match(/\[White\s+"([^"]+)"\]/);
+    const fenM = pgnContent.match(/\[FEN\s+"([^"]+)"\]/);
+    const title = (evM?.[1] && evM[1] !== '?') ? evM[1]
+                : (whM?.[1] && whM[1] !== '?') ? whM[1] : 'Game';
+    const startFen = fenM?.[1] || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    const moveText = pgnContent.replace(/\[[^\]]*\]/g, '').trim();
+    const toks = tokenizePgn(moveText);
+    const nmap = {}, mainLine = [];
+    buildTree(toks, 0, new Chess(startFen), mainLine, null, 0, nmap);
+    return { title, startFen, mainLine, nmap };
+  } catch (e) {
+    console.error('[pgn]', e);
+    return null;
+  }
+}
 
 function splitPgnGames(content) {
   if (!content) return [];
   const chunks = content.trim().split(/\n\n(?=\[)/);
-  return chunks.filter(c => c.trim().startsWith("[") || c.trim().match(/^\d+\./));
+  return chunks.filter(c => c.trim().startsWith('[') || c.trim().match(/^\d+\./));
 }
 
+// kept for backwards compat — not used by PgnViewer anymore
 function parsePgnGame(rawPgn) {
   try {
     const chess = new Chess();
@@ -1362,80 +1520,142 @@ function PdfViewer({ pdfs, initialIndex = 0, title, onClose }) {
   );
 }
 
+// ── Notation rendering (recursive, supports variations) ───────────────────────
+
+function MoveToken({ node, isActive, onActivate, depth }) {
+  const sym = nagGlyph(node.nags);
+  return (
+    <button
+      data-active={isActive ? "true" : undefined}
+      onClick={() => onActivate(node)}
+      className={cn(
+        "inline px-1.5 py-0.5 rounded font-mono font-semibold transition-colors",
+        isActive
+          ? "bg-[#f97316] text-white"
+          : depth === 0
+            ? "text-gray-800 hover:bg-orange-50 hover:text-[#f97316]"
+            : depth === 1
+              ? "text-gray-500 hover:bg-orange-50 hover:text-[#ea6c00]"
+              : "text-gray-400 hover:bg-orange-50 hover:text-[#ea6c00]"
+      )}>
+      {node.san}
+      {sym && <span className={cn("font-sans", isActive ? "text-white" : "text-[#f97316]")}>{sym}</span>}
+    </button>
+  );
+}
+
+function NotationSeq({ moves, activeId, onActivate, depth }) {
+  if (!moves?.length) return null;
+  const varTextCls = depth === 0 ? "text-[13px]" : depth === 1 ? "text-[12px] text-gray-500" : "text-[11px] text-gray-400";
+
+  return (
+    <span className={varTextCls}>
+      {moves.map((node, i) => {
+        const isWhite = node.color === 'w';
+        const prev    = i > 0 ? moves[i - 1] : null;
+        const gap     = i === 0 || (prev && (prev.comment || prev.variations.length > 0));
+        const showNum = isWhite || gap;
+        return (
+          <span key={node.id}>
+            {showNum && (
+              <span className="text-gray-400 select-none font-mono">
+                {node.fullMove}{isWhite ? '. ' : '... '}
+              </span>
+            )}
+            <MoveToken node={node} isActive={node.id === activeId} onActivate={onActivate} depth={depth} />
+            {' '}
+            {/* Variations inline */}
+            {node.variations.map((vs, vi) => (
+              <span key={vi} className="text-gray-400">
+                {'( '}
+                <NotationSeq moves={vs} activeId={activeId} onActivate={onActivate} depth={depth + 1} />
+                {') '}
+              </span>
+            ))}
+            {/* Comment inline */}
+            {node.comment && (
+              <span className="text-[12px] text-orange-500 italic">{node.comment} </span>
+            )}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 // ── PgnViewer ─────────────────────────────────────────────────────────────────
 
 function PgnViewer({ pgn, title, onClose }) {
-  const { user }         = useAuth();
-  const boardTheme       = BOARD_THEMES.find(t => t.id === (user?.settings?.boardTheme ?? "brown")) || BOARD_THEMES[0];
-  const [chapters,       setChapters]   = useState([]);
-  const [chapterIdx,     setChapterIdx] = useState(0);
-  const [moveIdx,        setMoveIdx]    = useState(-1);
-  const moveListRef                      = useRef(null);
+  const { user }       = useAuth();
+  const boardTheme     = BOARD_THEMES.find(t => t.id === (user?.settings?.boardTheme ?? "brown")) || BOARD_THEMES[0];
+  const [chapters,     setChapters]   = useState([]);
+  const [chapterIdx,   setChapterIdx] = useState(0);
+  const [activeNode,   setActiveNode] = useState(null);
+  const notationRef                    = useRef(null);
 
-  useEffect(() => {
-    function onKey(e) { if (e.key === "Escape") onClose(); }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
+  // Load chapters
   useEffect(() => {
     const games  = splitPgnGames(pgn?.content || "");
-    const parsed = games.map(parsePgnGame).filter(Boolean);
+    const parsed = games.map(parseGameTree).filter(Boolean);
     setChapters(parsed.length
       ? parsed
-      : [{ title: pgn?.name || "Game", moves: [], startFen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" }]
+      : [{ title: pgn?.name || "Game", startFen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", mainLine: [], nmap: {} }]
     );
     setChapterIdx(0);
-    setMoveIdx(-1);
+    setActiveNode(null);
   }, [pgn]);
 
-  const chapter       = chapters[chapterIdx];
-  const totalMoves    = chapter?.moves.length ?? 0;
-  const currentFen    = moveIdx < 0 ? chapter?.startFen : chapter?.moves[moveIdx]?.fen;
-  const currentComment = moveIdx >= 0 ? chapter?.moves[moveIdx]?.comment : null;
+  const chapter = chapters[chapterIdx];
 
-  function goTo(i) {
-    setMoveIdx(Math.max(-1, Math.min(totalMoves - 1, i)));
+  // Navigate
+  function activate(node) { setActiveNode(node || null); }
+
+  function goNext() {
+    if (!activeNode) { if (chapter?.mainLine?.length) activate(chapter.mainLine[0]); }
+    else if (activeNode.nextNode) activate(activeNode.nextNode);
+  }
+  function goPrev() {
+    if (!activeNode) return;
+    activate(activeNode.prevNode); // prevNode null → back to start
   }
 
-  // Keyboard navigation
+  // Keyboard: ← → + Escape
   useEffect(() => {
-    function onKeyNav(e) {
-      if (e.key === "ArrowLeft")  goTo(moveIdx - 1);
-      if (e.key === "ArrowRight") goTo(moveIdx + 1);
+    function onKey(e) {
+      if (e.key === "Escape")      { onClose(); return; }
+      if (e.key === "ArrowRight")  { e.preventDefault(); goNext(); }
+      if (e.key === "ArrowLeft")   { e.preventDefault(); goPrev(); }
     }
-    window.addEventListener("keydown", onKeyNav);
-    return () => window.removeEventListener("keydown", onKeyNav);
-  }, [moveIdx, totalMoves]); // eslint-disable-line react-hooks/exhaustive-deps
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeNode, chapter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-scroll active move into view in move list
+  // Scroll active move into view in notation
   useEffect(() => {
-    if (!moveListRef.current) return;
-    const active = moveListRef.current.querySelector("[data-active='true']");
-    active?.scrollIntoView({ block: "nearest" });
-  }, [moveIdx]);
+    if (!notationRef.current) return;
+    notationRef.current.querySelector('[data-active="true"]')?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [activeNode]);
 
-  function movePairs(moves) {
-    const pairs = [];
-    for (let i = 0; i < moves.length; i += 2)
-      pairs.push({ num: Math.floor(i / 2) + 1, w: moves[i], b: moves[i + 1] });
-    return pairs;
-  }
-
-  const navBtnCls = "w-9 h-9 rounded-xl border border-gray-200 bg-white text-gray-600 flex items-center justify-center hover:border-[#f97316] hover:text-[#f97316] transition-colors disabled:opacity-30 disabled:pointer-events-none shadow-sm";
+  const currentFen = activeNode?.fen ?? chapter?.startFen;
+  const arrows     = activeNode?.arrows  ?? [];
+  const sqStyles   = activeNode?.sqStyles ?? {};
 
   return (
     <div className="fixed inset-0 z-[300] flex flex-col bg-[#f6f8fc]">
 
-      {/* Header — same dark bar as the app header */}
-      <div className="shrink-0 flex items-center justify-between px-5 py-3.5 bg-[#1a140f] border-b-2 border-[#1a140f]">
+      {/* Header */}
+      <div className="shrink-0 flex items-center justify-between px-5 py-3.5 bg-[#1a140f]">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-[#f97316] flex items-center justify-center shrink-0">
             <BookOpen size={14} className="text-white" />
           </div>
           <div>
             <p className="text-[15px] font-black text-white leading-tight">{title || pgn?.name || "PGN Viewer"}</p>
-            {chapter && <p className="text-[11px] text-white/40">{chapter.title}</p>}
+            <p className="text-[11px] text-white/40">
+              {activeNode
+                ? `${activeNode.fullMove}${activeNode.color === 'w' ? '.' : '...'} ${activeNode.san}`
+                : "Starting position · ← → to navigate"}
+            </p>
           </div>
         </div>
         <button onClick={onClose}
@@ -1447,104 +1667,41 @@ function PgnViewer({ pgn, title, onClose }) {
       {/* Body */}
       <div className="flex-1 min-h-0 flex overflow-hidden">
 
-        {/* ── Left: board + nav + move list ── */}
-        <div className="flex flex-col min-h-0 flex-1 p-5 gap-4 overflow-y-auto">
-
-          {/* Board */}
-          <div className="flex justify-center">
-            <div className="w-full max-w-[460px]">
-              <div className="rounded-2xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
-                {currentFen && (
-                  <Chessboard options={{
-                    position:       currentFen,
-                    allowDragging:  false,
-                    darkSquareStyle:  { backgroundColor: boardTheme.dark },
-                    lightSquareStyle: { backgroundColor: boardTheme.light },
-                    boardStyle:       { borderRadius: 0 },
-                  }} />
-                )}
-              </div>
+        {/* Left: board */}
+        <div className="flex flex-col items-center justify-center min-h-0 flex-1 p-5 overflow-hidden">
+          <div className="w-full max-w-[520px]">
+            <div className="rounded-2xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
+              {currentFen && (
+                <Chessboard options={{
+                  position:         currentFen,
+                  allowDragging:    false,
+                  arrows,
+                  squareStyles:     sqStyles,
+                  darkSquareStyle:  { backgroundColor: boardTheme.dark },
+                  lightSquareStyle: { backgroundColor: boardTheme.light },
+                  boardStyle:       { borderRadius: 0 },
+                }} />
+              )}
             </div>
           </div>
-
-          {/* Navigation controls */}
-          <div className="flex items-center justify-center gap-2">
-            <button onClick={() => goTo(-1)} disabled={moveIdx < 0} className={navBtnCls} title="Start">
-              <ChevronLeft size={13} /><ChevronLeft size={13} className="-ml-2" />
-            </button>
-            <button onClick={() => goTo(moveIdx - 1)} disabled={moveIdx < 0} className={navBtnCls} title="Previous">
-              <ChevronLeft size={16} />
-            </button>
-            <div className="w-24 h-9 rounded-xl bg-white border border-gray-200 shadow-sm flex items-center justify-center">
-              <span className="text-[12px] font-bold text-gray-500">
-                {moveIdx < 0 ? "Start" : `${moveIdx + 1} / ${totalMoves}`}
-              </span>
-            </div>
-            <button onClick={() => goTo(moveIdx + 1)} disabled={moveIdx >= totalMoves - 1} className={navBtnCls} title="Next">
-              <ChevronRight size={16} />
-            </button>
-            <button onClick={() => goTo(totalMoves - 1)} disabled={moveIdx >= totalMoves - 1} className={navBtnCls} title="End">
-              <ChevronRight size={13} /><ChevronRight size={13} className="-ml-2" />
-            </button>
-          </div>
-
-          {/* Move list */}
-          {chapter && totalMoves > 0 && (
-            <div className="bg-white rounded-[20px] border border-gray-200 shadow-sm p-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.15em] text-gray-400 mb-3">Moves</p>
-              <div ref={moveListRef} className="flex flex-wrap gap-x-0.5 gap-y-0.5 max-h-[180px] overflow-y-auto">
-                {movePairs(chapter.moves).map(({ num, w, b }) => (
-                  <span key={num} className="flex items-center">
-                    <span className="text-[11px] text-gray-300 px-1 select-none font-mono">{num}.</span>
-                    <button
-                      data-active={moveIdx === (num - 1) * 2}
-                      onClick={() => goTo((num - 1) * 2)}
-                      className={cn(
-                        "px-2 py-1 rounded-lg text-[13px] font-mono font-semibold transition-colors",
-                        moveIdx === (num - 1) * 2
-                          ? "bg-[#f97316] text-white shadow-sm"
-                          : "text-gray-700 hover:bg-orange-50 hover:text-[#f97316]"
-                      )}>
-                      {w.san}
-                      {w.comment && <span className="ml-0.5 inline-block w-1.5 h-1.5 rounded-full bg-[#f97316] align-middle" />}
-                    </button>
-                    {b && (
-                      <button
-                        data-active={moveIdx === (num - 1) * 2 + 1}
-                        onClick={() => goTo((num - 1) * 2 + 1)}
-                        className={cn(
-                          "px-2 py-1 rounded-lg text-[13px] font-mono font-semibold transition-colors",
-                          moveIdx === (num - 1) * 2 + 1
-                            ? "bg-[#f97316] text-white shadow-sm"
-                            : "text-gray-700 hover:bg-orange-50 hover:text-[#f97316]"
-                        )}>
-                        {b.san}
-                        {b.comment && <span className="ml-0.5 inline-block w-1.5 h-1.5 rounded-full bg-[#f97316] align-middle" />}
-                      </button>
-                    )}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* ── Right: chapters + comment ── */}
-        <div className="w-[280px] shrink-0 border-l-2 border-gray-200 flex flex-col min-h-0 bg-white">
+        {/* Right: chapters + notation */}
+        <div className="w-[300px] shrink-0 border-l-2 border-gray-200 flex flex-col min-h-0 bg-white">
 
-          {/* Chapters */}
+          {/* Chapters — max 5 visible, scrollable */}
           <div className="shrink-0 border-b border-gray-100">
-            <div className="px-4 py-3 flex items-center gap-2 bg-gray-50/80 border-b border-gray-100">
-              <BookOpen size={13} className="text-[#f97316]" />
+            <div className="px-4 py-2.5 flex items-center gap-2 bg-gray-50 border-b border-gray-100">
+              <BookOpen size={12} className="text-[#f97316]" />
               <span className="text-[11px] font-black uppercase tracking-[0.15em] text-gray-500">Chapters</span>
               <span className="ml-auto text-[11px] text-gray-400">{chapters.length}</span>
             </div>
-            <div className="overflow-y-auto max-h-[220px]">
+            <div className="overflow-y-auto" style={{ maxHeight: `${5 * 44}px` }}>
               {chapters.map((ch, i) => (
                 <button key={i}
-                  onClick={() => { setChapterIdx(i); setMoveIdx(-1); }}
+                  onClick={() => { setChapterIdx(i); setActiveNode(null); }}
                   className={cn(
-                    "w-full text-left px-4 py-3 text-[13px] transition-colors border-b border-gray-50 last:border-0 flex items-center gap-2",
+                    "w-full text-left px-3 py-2.5 text-[13px] transition-colors border-b border-gray-50 last:border-0 flex items-center gap-2 min-h-[44px]",
                     i === chapterIdx
                       ? "bg-orange-50 text-[#f97316] font-bold"
                       : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
@@ -1553,51 +1710,29 @@ function PgnViewer({ pgn, title, onClose }) {
                     "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0",
                     i === chapterIdx ? "bg-[#f97316] text-white" : "bg-gray-100 text-gray-400"
                   )}>{i + 1}</span>
-                  <span className="truncate">{ch.title}</span>
+                  <span className="truncate text-[12px]">{ch.title}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Comment — only current move's comment */}
+          {/* Notation */}
           <div className="flex-1 min-h-0 flex flex-col">
-            <div className="px-4 py-3 flex items-center gap-2 bg-gray-50/80 border-b border-gray-100 shrink-0">
-              <MessageSquare size={13} className="text-[#f97316]" />
-              <span className="text-[11px] font-black uppercase tracking-[0.15em] text-gray-500">Comment</span>
+            <div className="px-4 py-2.5 flex items-center gap-2 bg-gray-50 border-b border-gray-100 shrink-0">
+              <FileText size={12} className="text-[#f97316]" />
+              <span className="text-[11px] font-black uppercase tracking-[0.15em] text-gray-500">Notation</span>
             </div>
-            <div className="flex-1 p-4">
-              <AnimatePresence mode="wait">
-                {currentComment ? (
-                  <motion.div key={`comment-${moveIdx}`}
-                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.18 }}>
-                    <div className="rounded-2xl bg-orange-50 border border-orange-100 p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-6 h-6 rounded-full bg-[#f97316] flex items-center justify-center shrink-0">
-                          <MessageSquare size={11} className="text-white" />
-                        </div>
-                        <span className="text-[11px] font-bold text-orange-600">
-                          After {chapter?.moves[moveIdx]?.san}
-                        </span>
-                      </div>
-                      <p className="text-[13px] text-gray-700 leading-relaxed">{currentComment}</p>
-                    </div>
-                  </motion.div>
-                ) : (
-                  <motion.div key="no-comment"
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    className="flex flex-col items-center justify-center h-full py-8 text-center">
-                    <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                      <MessageSquare size={16} className="text-gray-300" />
-                    </div>
-                    <p className="text-[12px] text-gray-400">
-                      {moveIdx < 0
-                        ? "Navigate moves to see comments"
-                        : "No comment on this move"}
-                    </p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+            <div ref={notationRef} className="flex-1 overflow-y-auto p-4 leading-loose">
+              {chapter?.mainLine?.length ? (
+                <NotationSeq
+                  moves={chapter.mainLine}
+                  activeId={activeNode?.id ?? null}
+                  onActivate={activate}
+                  depth={0}
+                />
+              ) : (
+                <p className="text-[12px] text-gray-400 text-center pt-4">No moves</p>
+              )}
             </div>
           </div>
         </div>
