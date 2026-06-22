@@ -5,7 +5,6 @@ import {
   Users,
   Zap,
   BookOpen,
-  FileText,
   Building2,
   Settings,
   Activity,
@@ -25,7 +24,6 @@ const NAV_SECTIONS = [
       { id: "batches", icon: Users, label: "Batches" },
       { id: "learn", icon: GraduationCap, label: "Learn Chess", roles: ["admin"] },
       { id: "homework", icon: BookOpen, label: "Homework" },
-      { id: "pgn-center", icon: FileText, label: "PGN Center", roles: ["admin", "coach", "academy"] },
     ],
   },
   {
