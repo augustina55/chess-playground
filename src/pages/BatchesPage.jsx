@@ -11,6 +11,7 @@ import {
   getBatches, getBatchesByAcademy, createBatch, deleteBatch,
   getBatchStudents, addStudentToBatch, removeStudentFromBatch, getBatchStudentCounts,
   getProfilesByAcademy, getProfiles, getAcademies, getBatchesForStudent,
+  getAcademyInvitations,
 } from "../lib/db";
 
 // ── constants ──────────────────────────────────────────────────────────────────
@@ -116,8 +117,8 @@ function Field({ label, children }) {
 
 // ── AddBatchDrawer ────────────────────────────────────────────────────────────
 
-function AddBatchDrawer({ open, onClose, onSave, defaultCoach }) {
-  const blank = { name: "", coach: defaultCoach || "", level: "Beginner", days: [], times: {}, meetingLink: "", isActive: true };
+function AddBatchDrawer({ open, onClose, onSave, defaultCoach, coaches = [] }) {
+  const blank = { name: "", coach: defaultCoach || "", coachId: null, level: "Beginner", days: [], times: {}, meetingLink: "", isActive: true };
   const [form, setForm] = useState(blank);
 
   function toggleDay(val) {
@@ -169,10 +170,26 @@ function AddBatchDrawer({ open, onClose, onSave, defaultCoach }) {
                     placeholder="e.g. Beginners Batch A" autoFocus required />
                 </Field>
 
-                <Field label="Coach Name">
-                  <input className={inputCls} value={form.coach}
-                    onChange={e => setForm(f => ({ ...f, coach: e.target.value }))}
-                    placeholder="Coach name" />
+                <Field label="Coach">
+                  {coaches.length > 0 ? (
+                    <select
+                      className={cn(inputCls, "cursor-pointer")}
+                      value={form.coachId ?? ""}
+                      onChange={e => {
+                        const c = coaches.find(x => String(x.id) === e.target.value);
+                        setForm(f => ({ ...f, coachId: c ? c.id : null, coach: c ? c.name : "" }));
+                      }}
+                    >
+                      <option value="">— Select coach —</option>
+                      {coaches.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input className={inputCls} value={form.coach}
+                      onChange={e => setForm(f => ({ ...f, coach: e.target.value }))}
+                      placeholder="Coach name" />
+                  )}
                 </Field>
 
                 <Field label="Level">
@@ -514,7 +531,7 @@ function BatchRow({ batch, studentCount, onDelete, onClick, canManage }) {
 
 // ── MyBatchesTab ──────────────────────────────────────────────────────────────
 
-function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, academyStudents }) {
+function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, academyStudents, academyCoaches = [] }) {
   const [showAdd, setShowAdd]   = useState(false);
   const [selected, setSelected] = useState(null);
 
@@ -586,6 +603,7 @@ function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, a
         onClose={() => setShowAdd(false)}
         onSave={handleSave}
         defaultCoach={user?.name || ""}
+        coaches={academyCoaches}
       />
 
       <StudentManagementDrawer
@@ -913,6 +931,7 @@ function CoachAdminBatchesView({ search }) {
   const [studentCounts,   setStudentCounts]   = useState({});
   const [academyStudents, setAcademyStudents] = useState([]);
   const [academyId,       setAcademyId]       = useState(null);
+  const [academyCoaches,  setAcademyCoaches]  = useState([]);
   const [tab,             setTab]             = useState("batches");
 
   useEffect(() => {
@@ -932,6 +951,20 @@ function CoachAdminBatchesView({ search }) {
           setAcademyStudents(profiles);
           setStudentCounts(counts);
         });
+
+      if (id) {
+        getAcademyInvitations(id).then(invs => {
+          const list = invs
+            .filter(i => i.status === "accepted")
+            .map(i => ({ id: i.coachId, name: i.coachName }));
+          if (user?.role === "coach" && user?.id && !list.find(c => String(c.id) === String(user.id))) {
+            list.unshift({ id: user.id, name: user.name });
+          }
+          setAcademyCoaches(list);
+        });
+      } else if (user?.role === "coach" && user?.id) {
+        setAcademyCoaches([{ id: user.id, name: user.name }]);
+      }
     });
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -942,7 +975,7 @@ function CoachAdminBatchesView({ search }) {
       id,
       students: [],
       academyId: academyId || null,
-      coachId:   user?.role === "coach" ? user?.id : null,
+      coachId:   batch.coachId || (user?.role === "coach" ? user?.id : null),
     });
     setBatches(prev => [...prev, created]);
   }
@@ -984,6 +1017,7 @@ function CoachAdminBatchesView({ search }) {
             search={search}
             user={user}
             academyStudents={academyStudents}
+            academyCoaches={academyCoaches}
           />
         )}
         {tab === "calendar" && (

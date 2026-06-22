@@ -12,7 +12,7 @@ import { useAuth } from "../context/AuthContext";
 import {
   getCoaches, createCoach, deleteCoach,
   getProfiles, getProfilesByAcademy, createProfile, deleteProfile,
-  getBatches, getBatchesForStudent,
+  getBatches, getBatchesByAcademy, getBatchesForStudent,
   getAcademies, updateAcademy,
   searchCoachProfiles, inviteCoachToAcademy, getAcademyInvitations,
 } from "../lib/db";
@@ -762,7 +762,7 @@ function CoachesTab() {
 
 const LEVEL_PREFIX = { Beginner: "BEG", Intermediate: "INT", Advanced: "ADV", Open: "OPN" };
 
-function AddStudentDrawer({ open, onClose, onSave, existingUsernames, students = [] }) {
+function AddStudentDrawer({ open, onClose, onSave, existingUsernames, students = [], batches = [] }) {
   const blank = { name: "", phone: "", email: "", username: "", password: "", level: "", batchCode: "" };
   const [form,    setForm]   = useState(blank);
   const [showPw,  setShowPw] = useState(false);
@@ -852,20 +852,33 @@ function AddStudentDrawer({ open, onClose, onSave, existingUsernames, students =
             </div>
           </Field>
 
-          <Field label="Batch Code">
-            <div className="relative">
-              <input
-                className={inputCls}
+          <Field label="Batch">
+            {batches.length > 0 ? (
+              <select
+                className={cn(inputCls, "cursor-pointer")}
                 value={form.batchCode}
                 onChange={e => setForm(f => ({ ...f, batchCode: e.target.value }))}
-                placeholder={autoCode || "e.g. BEG3"}
-              />
-              {!form.batchCode && autoCode && (
-                <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-gray-400 pointer-events-none">
-                  auto → {autoCode}
-                </span>
-              )}
-            </div>
+              >
+                <option value="">— Select batch —</option>
+                {batches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}{b.level ? ` (${b.level})` : ""}</option>
+                ))}
+              </select>
+            ) : (
+              <div className="relative">
+                <input
+                  className={inputCls}
+                  value={form.batchCode}
+                  onChange={e => setForm(f => ({ ...f, batchCode: e.target.value }))}
+                  placeholder={autoCode || "e.g. BEG3"}
+                />
+                {!form.batchCode && autoCode && (
+                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-gray-400 pointer-events-none">
+                    auto → {autoCode}
+                  </span>
+                )}
+              </div>
+            )}
           </Field>
         </div>
         <div className="px-6 py-5 bg-white border-t border-gray-200 shrink-0 flex gap-3">
@@ -1016,6 +1029,7 @@ function StudentsTab() {
   const [showAdd,  setShowAdd]  = useState(false);
   const [selected, setSelected] = useState(null);
   const [filter,   setFilter]   = useState("");
+  const [academyBatches, setAcademyBatches] = useState([]);
 
   useEffect(() => {
     getAcademies().then(all => {
@@ -1026,8 +1040,12 @@ function StudentsTab() {
         ac = all[0] || null;
       const id = ac?.id || null;
       setAcademyId(id);
-      if (id) getProfilesByAcademy(id).then(setUsers);
-      else getProfiles().then(setUsers);
+      if (id) {
+        getProfilesByAcademy(id).then(setUsers);
+        getBatchesByAcademy(id).then(setAcademyBatches);
+      } else {
+        getProfiles().then(setUsers);
+      }
     });
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1122,6 +1140,7 @@ function StudentsTab() {
         onSave={handleSave}
         existingUsernames={existingUsernames}
         students={users.filter(u => u.role === "student")}
+        batches={academyBatches}
       />
       <StudentProfileDrawer
         student={selected}
