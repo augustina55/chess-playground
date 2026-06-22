@@ -28,13 +28,15 @@ function NotificationDropdown({ invitations, onRespond, onClose }) {
     function handler(e) {
       if (ref.current && !ref.current.contains(e.target)) onClose();
     }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    // Use setTimeout so the click that opened the panel doesn't immediately close it
+    const t = setTimeout(() => document.addEventListener("mousedown", handler), 0);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
   }, [onClose]);
 
   return (
+    // fixed so it escapes overflow-hidden on App wrapper
     <div ref={ref}
-      className="absolute right-0 top-[calc(100%+10px)] w-[340px] bg-white rounded-[20px] border-2 border-[#1a140f] shadow-[0_8px_0_#1a140f,0_12px_32px_rgba(0,0,0,0.15)] z-50 overflow-hidden">
+      className="fixed right-4 top-20 w-[340px] bg-white rounded-[20px] border-2 border-[#1a140f] shadow-[0_8px_0_#1a140f,0_12px_32px_rgba(0,0,0,0.15)] z-[200] overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
         <p className="text-[13px] font-black text-gray-900">Academy Invitations</p>
         <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors">
