@@ -4,7 +4,6 @@ import {
   LayoutDashboard,
   Users,
   Zap,
-  BookOpen,
   Building2,
   Settings,
   Activity,
@@ -23,7 +22,6 @@ const NAV_SECTIONS = [
     items: [
       { id: "batches", icon: Users, label: "Batches", labels: { student: "Classroom" } },
       { id: "learn", icon: GraduationCap, label: "Learn Chess", roles: ["admin"] },
-      { id: "homework", icon: BookOpen, label: "Homework" },
     ],
   },
   {
