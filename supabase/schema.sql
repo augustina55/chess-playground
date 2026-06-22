@@ -176,6 +176,18 @@ create table if not exists homework_progress (
   unique (homework_id, student_id, puzzle_id)
 );
 
+-- ── academy_invitations: coach invite/accept flow ────────────────────────────
+
+create table if not exists academy_invitations (
+  id           bigserial   primary key,
+  academy_id   bigint      not null references academies(id)  on delete cascade,
+  coach_id     bigint      not null references profiles(id)   on delete cascade,
+  status       text        not null default 'pending',   -- pending / accepted / rejected
+  invited_at   timestamptz not null default now(),
+  responded_at timestamptz,
+  unique (academy_id, coach_id)
+);
+
 -- ── homework_submissions: student answers submitted for coach review ─────────
 
 create table if not exists homework_submissions (
@@ -203,6 +215,7 @@ alter table puzzles               disable row level security;
 alter table homework              disable row level security;
 alter table homework_progress     disable row level security;
 alter table homework_submissions  disable row level security;
+alter table academy_invitations   disable row level security;
 alter table attendance        disable row level security;
 alter table race_scores       disable row level security;
 

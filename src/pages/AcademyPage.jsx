@@ -5,7 +5,7 @@ import {
   Plus, Users, Trash2, X, Search, Eye, EyeOff,
   GraduationCap, Star, Phone, Mail, Calendar,
   ChevronRight, Link2, UserCheck, BookOpen, BarChart2,
-  Upload, Check, AlertCircle, ZoomIn, ZoomOut,
+  Upload, Check, AlertCircle, ZoomIn, ZoomOut, Clock,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
@@ -14,6 +14,7 @@ import {
   getProfiles, getProfilesByAcademy, createProfile, deleteProfile,
   getBatches, getBatchesForStudent,
   getAcademies, updateAcademy,
+  searchCoachProfiles, inviteCoachToAcademy, getAcademyInvitations,
 } from "../lib/db";
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -558,118 +559,201 @@ function CoachDetailDrawer({ coach, open, onClose }) {
 // ── Coaches tab ───────────────────────────────────────────────────────────────
 
 function CoachesTab() {
-  const [coaches,  setCoaches]  = useState([]);
-  const [showAdd,  setShowAdd]  = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [filter,   setFilter]   = useState("");
+  const { user } = useAuth();
+  const [academy,     setAcademy]     = useState(null);
+  const [invitations, setInvitations] = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [searchQ,     setSearchQ]     = useState("");
+  const [searchRes,   setSearchRes]   = useState([]);
+  const [searching,   setSearching]   = useState(false);
+  const [inviting,    setInviting]    = useState(null);
+  const [inviteError, setInviteError] = useState("");
 
-  useEffect(() => { getCoaches().then(setCoaches); }, []);
+  useEffect(() => {
+    async function load() {
+      const all = await getAcademies();
+      let ac = null;
+      if (user?.role === "coach")      ac = all.find(a => String(a.mainCoachId) === String(user.id));
+      else if (user?.role === "admin") ac = all[0];
+      if (!ac) { setLoading(false); return; }
+      setAcademy(ac);
+      const invs = await getAcademyInvitations(ac.id);
+      setInvitations(invs);
+      setLoading(false);
+    }
+    load();
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = useMemo(() =>
-    coaches.filter(c => !filter || c.name.toLowerCase().includes(filter.toLowerCase())),
-    [coaches, filter]
-  );
-
-  async function handleAdd(form) {
-    const created = await createCoach(form);
-    setCoaches(prev => [...prev, created]);
+  async function search() {
+    if (!searchQ.trim()) return;
+    setSearching(true);
+    setSearchRes([]);
+    const res = await searchCoachProfiles(searchQ);
+    setSearchRes(res);
+    setSearching(false);
   }
 
-  async function handleDelete(id) {
-    await deleteCoach(id);
-    setCoaches(prev => prev.filter(c => c.id !== id));
+  async function invite(coach) {
+    if (!academy) return;
+    setInviting(coach.id);
+    setInviteError("");
+    try {
+      await inviteCoachToAcademy(academy.id, coach.id);
+      setInvitations(prev => [
+        {
+          id: Date.now(), academyId: academy.id, coachId: coach.id,
+          status: "pending", invitedAt: new Date().toISOString(),
+          coachName: coach.name, coachUsername: coach.username,
+          coachAvatar: coach.avatar, coachRating: coach.rating,
+        },
+        ...prev.filter(i => i.coachId !== coach.id),
+      ]);
+      setSearchRes(prev => prev.filter(r => r.id !== coach.id));
+    } catch (err) {
+      setInviteError(err?.message || "Failed to send invite");
+    } finally {
+      setInviting(null);
+    }
   }
+
+  const invitedIds = new Set(invitations.map(i => String(i.coachId)));
+  const accepted   = invitations.filter(i => i.status === "accepted");
+  const pending    = invitations.filter(i => i.status === "pending");
 
   return (
     <>
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between mb-6">
-        <div className="relative flex-1 max-w-xs">
-          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-          <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter by name…"
-            className="w-full h-10 pl-9 pr-4 rounded-2xl border border-gray-200 bg-white text-[13px] text-gray-700 placeholder:text-gray-400 outline-none focus:border-brand-500 transition-colors" />
+      {/* ── Invite section ── */}
+      <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm p-6 mb-6">
+        <h3 className="text-[14px] font-bold text-gray-900 mb-1">Invite a Coach</h3>
+        <p className="text-[12px] text-gray-400 mb-4">Search by username or name — coach must have a coach account to be invited.</p>
+        <div className="flex gap-3">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <input
+              value={searchQ}
+              onChange={e => { setSearchQ(e.target.value); setSearchRes([]); }}
+              onKeyDown={e => e.key === "Enter" && search()}
+              placeholder="Search username or name…"
+              className="w-full h-11 pl-9 pr-4 rounded-2xl border border-gray-200 bg-white text-[13px] text-gray-700 placeholder:text-gray-400 outline-none focus:border-brand-500 transition-colors"
+            />
+          </div>
+          <button onClick={search} disabled={searching || !searchQ.trim()}
+            className="h-11 px-5 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-semibold transition-all disabled:opacity-50 shrink-0 flex items-center gap-2">
+            {searching ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />Searching</> : <><Search size={13} />Search</>}
+          </button>
         </div>
-        <button onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 h-10 px-5 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-semibold shadow-lg shadow-brand-500/20 transition-all shrink-0">
-          <Plus size={15} />Add Coach
-        </button>
+
+        {inviteError && (
+          <p className="mt-2 text-[12px] text-red-500 flex items-center gap-1">
+            <AlertCircle size={11} />{inviteError}
+          </p>
+        )}
+
+        {searchRes.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {searchRes.map(coach => {
+              const alreadyInvited = invitedIds.has(String(coach.id));
+              return (
+                <motion.div key={coach.id}
+                  initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-400 to-violet-600 text-white font-black text-[13px] flex items-center justify-center shrink-0">
+                    {coach.avatar || coach.name?.[0]?.toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-bold text-gray-900 truncate">{coach.name}</p>
+                    <p className="text-[11px] text-gray-400">@{coach.username}{coach.rating ? ` · ♟ ${coach.rating}` : ""}</p>
+                  </div>
+                  <button
+                    onClick={() => invite(coach)}
+                    disabled={alreadyInvited || inviting === coach.id}
+                    className={cn(
+                      "h-8 px-4 rounded-xl text-[12px] font-bold shrink-0 transition-all",
+                      alreadyInvited ? "bg-gray-100 text-gray-400 cursor-default" : "bg-brand-600 hover:bg-brand-700 text-white"
+                    )}>
+                    {inviting === coach.id ? "…" : alreadyInvited ? "Invited" : "Invite"}
+                  </button>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+
+        {searchQ && !searching && searchRes.length === 0 && (
+          <p className="mt-3 text-[12px] text-gray-400 flex items-center gap-1.5">
+            <AlertCircle size={12} />No coach accounts found for &quot;{searchQ}&quot;.
+          </p>
+        )}
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="rounded-[28px] bg-white border border-gray-200 py-20 flex flex-col items-center text-center">
-          <div className="w-16 h-16 rounded-[20px] bg-brand-50 flex items-center justify-center mb-4">
-            <UserCheck size={28} className="text-brand-400" />
+      {/* ── Coach list ── */}
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <span className="w-6 h-6 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
+        </div>
+      ) : invitations.length === 0 ? (
+        <div className="rounded-[28px] bg-white border border-gray-200 py-16 flex flex-col items-center text-center">
+          <div className="w-14 h-14 rounded-[18px] bg-brand-50 flex items-center justify-center mb-4">
+            <UserCheck size={24} className="text-brand-400" />
           </div>
-          <h3 className="text-[16px] font-bold text-gray-800">{filter ? "No matches" : "No coaches yet"}</h3>
-          <p className="text-[13px] text-gray-400 mt-1.5 max-w-xs">
-            {filter ? "Try a different name." : "Add your first coach to get started."}
-          </p>
-          {!filter && (
-            <button onClick={() => setShowAdd(true)} className="mt-5 h-10 px-5 rounded-xl bg-brand-600 text-white text-[13px] font-semibold">
-              Add Coach
-            </button>
-          )}
+          <h3 className="text-[15px] font-bold text-gray-800">No coaches yet</h3>
+          <p className="text-[12px] text-gray-400 mt-1.5 max-w-xs">Search above to invite coach accounts to your academy.</p>
         </div>
       ) : (
-        <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-4 px-5 py-3 border-b border-gray-100 bg-gray-50/80">
-            <p className="flex-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Coach</p>
-            <p className="hidden sm:block w-20 shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400">Rating</p>
-            <p className="hidden md:block w-56 shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400">Levels</p>
-            <p className="hidden sm:block w-28 shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400">Contact</p>
-            <span className="w-14 shrink-0" />
-          </div>
-
-          {filtered.map(coach => (
-            <div key={coach.id} onClick={() => setSelected(coach)}
-              className="group flex items-center gap-4 px-5 py-4 border-b border-gray-100 last:border-0 hover:bg-gray-50/60 transition-colors cursor-pointer">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="w-10 h-10 rounded-[14px] bg-gradient-to-br from-brand-400 to-violet-600 text-white font-black text-[15px] flex items-center justify-center shrink-0">
-                  {coach.avatar}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[14px] font-bold text-gray-900 truncate">{coach.name}</p>
-                  {coach.email && <p className="text-[11px] text-gray-400 truncate">{coach.email}</p>}
-                </div>
-              </div>
-              <div className="hidden sm:flex items-center gap-1 w-20 shrink-0">
-                {coach.rating
-                  ? <><Star size={12} className="text-yellow-400 fill-yellow-400 shrink-0" /><span className="text-[13px] font-semibold text-gray-700">{coach.rating}</span></>
-                  : <span className="text-[13px] text-gray-300">—</span>}
-              </div>
-              <div className="hidden md:flex flex-wrap gap-1 w-56 shrink-0">
-                {coach.levels?.length > 0
-                  ? coach.levels.map(l => (
-                    <span key={l} className={cn("px-2 py-0.5 text-[10px] font-bold rounded-full border", LEVEL_CHIP[l] || "bg-gray-50 text-gray-500 border-gray-200")}>
-                      {l}
+        <div className="space-y-6">
+          {accepted.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-3 px-1">Active Coaches</p>
+              <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
+                {accepted.map((inv, i) => (
+                  <div key={inv.id}
+                    className={cn("flex items-center gap-4 px-5 py-4", i < accepted.length - 1 && "border-b border-gray-100")}>
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-white font-black text-[15px] flex items-center justify-center shrink-0">
+                      {inv.coachAvatar || inv.coachName?.[0]?.toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] font-bold text-gray-900 truncate">{inv.coachName}</p>
+                      <p className="text-[11px] text-gray-400">@{inv.coachUsername}</p>
+                    </div>
+                    {inv.coachRating && (
+                      <div className="hidden sm:flex items-center gap-1 shrink-0">
+                        <Star size={12} className="text-yellow-400 fill-yellow-400" />
+                        <span className="text-[13px] font-semibold text-gray-700">{inv.coachRating}</span>
+                      </div>
+                    )}
+                    <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full shrink-0">
+                      <Check size={10} strokeWidth={3} />Active
                     </span>
-                  ))
-                  : <span className="text-[12px] text-gray-300">—</span>}
-              </div>
-              <div className="hidden sm:block w-28 shrink-0">
-                <p className="text-[12px] text-gray-400 truncate">{coach.phone || "—"}</p>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <ChevronRight size={15} className="text-gray-300 group-hover:text-gray-500 transition-colors" />
-                <button onClick={e => { e.stopPropagation(); handleDelete(coach.id); }}
-                  className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all">
-                  <Trash2 size={13} />
-                </button>
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
+          )}
+
+          {pending.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-3 px-1">Pending Invitations</p>
+              <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
+                {pending.map((inv, i) => (
+                  <div key={inv.id}
+                    className={cn("flex items-center gap-4 px-5 py-4", i < pending.length - 1 && "border-b border-gray-100")}>
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-200 to-gray-300 text-gray-600 font-black text-[15px] flex items-center justify-center shrink-0">
+                      {inv.coachAvatar || inv.coachName?.[0]?.toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] font-bold text-gray-800 truncate">{inv.coachName}</p>
+                      <p className="text-[11px] text-gray-400">@{inv.coachUsername}</p>
+                    </div>
+                    <span className="flex items-center gap-1 text-[11px] font-bold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full shrink-0">
+                      <Clock size={10} />Pending
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
-
-      <AddCoachDrawer
-        open={showAdd}
-        onClose={() => setShowAdd(false)}
-        onSave={handleAdd}
-      />
-      <CoachDetailDrawer
-        coach={selected}
-        open={!!selected}
-        onClose={() => setSelected(null)}
-      />
     </>
   );
 }

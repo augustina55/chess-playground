@@ -465,6 +465,88 @@ export async function saveSubmissionReview(homeworkId, studentId, puzzleId, corr
   }
 }
 
+// ── Academy invitations (coach invite / accept flow) ─────────────────────────
+
+function invitationFromDb(row) {
+  return {
+    id:              row.id,
+    academyId:       row.academy_id,
+    coachId:         row.coach_id,
+    status:          row.status,
+    invitedAt:       row.invited_at,
+    respondedAt:     row.responded_at,
+    coachName:       row.profiles?.name     || null,
+    coachUsername:   row.profiles?.username || null,
+    coachAvatar:     row.profiles?.avatar   || null,
+    coachRating:     row.profiles?.rating   || null,
+    academyName:     row.academies?.name    || null,
+    academyLogo:     row.academies?.logo    || null,
+    academyLocation: row.academies?.location || null,
+  }
+}
+
+export async function searchCoachProfiles(query) {
+  if (!query?.trim()) return []
+  const { data } = await db()
+    .from('profiles')
+    .select('id, name, username, avatar, rating')
+    .eq('role', 'coach')
+    .or(`username.ilike.%${query.trim()}%,name.ilike.%${query.trim()}%`)
+    .limit(10)
+  return (data || []).map(r => ({ id: r.id, name: r.name, username: r.username, avatar: r.avatar, rating: r.rating }))
+}
+
+export async function inviteCoachToAcademy(academyId, coachId) {
+  const { error } = await db()
+    .from('academy_invitations')
+    .upsert({
+      academy_id:   academyId,
+      coach_id:     coachId,
+      status:       'pending',
+      invited_at:   new Date().toISOString(),
+      responded_at: null,
+    }, { onConflict: 'academy_id,coach_id' })
+  if (error) { console.error('[invitations] invite failed:', error.message); throw error }
+}
+
+export async function getAcademyInvitations(academyId) {
+  const { data, error } = await db()
+    .from('academy_invitations')
+    .select('*, profiles(name, username, avatar, rating)')
+    .eq('academy_id', academyId)
+    .order('invited_at', { ascending: false })
+  if (error) { console.error('[invitations] load failed:', error.message); return [] }
+  return (data || []).map(invitationFromDb)
+}
+
+export async function getCoachInvitations(coachId) {
+  const { data, error } = await db()
+    .from('academy_invitations')
+    .select('*, academies(name, logo)')
+    .eq('coach_id', coachId)
+    .eq('status', 'pending')
+  if (error) { console.error('[invitations] coach pending failed:', error.message); return [] }
+  return (data || []).map(invitationFromDb)
+}
+
+export async function getCoachAcademies(coachId) {
+  const { data, error } = await db()
+    .from('academy_invitations')
+    .select('*, academies(id, name, logo, location)')
+    .eq('coach_id', coachId)
+    .in('status', ['accepted'])
+  if (error) { console.error('[invitations] coach academies failed:', error.message); return [] }
+  return (data || []).map(invitationFromDb)
+}
+
+export async function respondToInvitation(invitationId, accept) {
+  const { error } = await db()
+    .from('academy_invitations')
+    .update({ status: accept ? 'accepted' : 'rejected', responded_at: new Date().toISOString() })
+    .eq('id', invitationId)
+  if (error) { console.error('[invitations] respond failed:', error.message); throw error }
+}
+
 // ── Race scores ───────────────────────────────────────────────────────────────
 
 function scoreFromDb(row) {

@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, LogOut, Check, ExternalLink, Unlink, Eye, EyeOff,
-  Bell, Palette,
+  Bell, Palette, Building2,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { startLichessOAuth } from "../utils/lichess";
 import { cn } from "../lib/utils";
+import { getCoachAcademies, getAcademies } from "../lib/db";
 
 // ── chess.com verification ────────────────────────────────────────────────────
 
@@ -65,6 +66,98 @@ function TabBar({ tab, setTab }) {
 }
 
 // ── My Profile tab ────────────────────────────────────────────────────────────
+
+function MyAcademiesSection() {
+  const { user, updateUser } = useAuth();
+  const [academies, setAcademies] = useState([]);
+  const [ownAcademy, setOwnAcademy] = useState(null);
+  const [switching, setSwitching] = useState(null);
+
+  useEffect(() => {
+    if (user?.role !== "coach" || !user?.id) return;
+    Promise.all([
+      getCoachAcademies(user.id),
+      getAcademies(),
+    ]).then(([invAcademies, allAcademies]) => {
+      const own = allAcademies.find(a => String(a.mainCoachId) === String(user.id));
+      setOwnAcademy(own || null);
+      setAcademies(invAcademies);
+    }).catch(() => {});
+  }, [user?.id, user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function setActive(academyId, academyName, academyLogo) {
+    setSwitching(academyId);
+    try {
+      const newSettings = { ...(user?.settings || {}), activeAcademyId: academyId };
+      await updateUser({ settings: newSettings });
+      // Broadcast new logo/name
+      localStorage.setItem("ca_academy_name", academyName || "");
+      localStorage.setItem("ca_academy_logo", academyLogo || "");
+      window.dispatchEvent(new CustomEvent("ca-logo-update"));
+    } catch (err) {
+      console.error("Failed to switch academy:", err);
+    } finally {
+      setSwitching(null);
+    }
+  }
+
+  // Combine own academy + invited academies (deduplicated)
+  const allAcademies = [];
+  if (ownAcademy) {
+    allAcademies.push({ id: ownAcademy.id, name: ownAcademy.name, logo: ownAcademy.logo, isOwn: true });
+  }
+  academies.forEach(a => {
+    if (!allAcademies.find(x => String(x.id) === String(a.academyId))) {
+      allAcademies.push({ id: a.academyId, name: a.academyName, logo: a.academyLogo, isOwn: false });
+    }
+  });
+
+  if (user?.role !== "coach" || allAcademies.length === 0) return null;
+
+  const activeId = user?.settings?.activeAcademyId || ownAcademy?.id;
+
+  return (
+    <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100">
+        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">My Academies</p>
+      </div>
+      <div className="p-4 space-y-2">
+        {allAcademies.map(ac => {
+          const isActive = String(ac.id) === String(activeId);
+          return (
+            <div key={ac.id} className={cn(
+              "flex items-center gap-3 p-3.5 rounded-2xl border transition-all",
+              isActive ? "bg-brand-50 border-brand-200" : "bg-gray-50 border-gray-100"
+            )}>
+              <div className="w-10 h-10 rounded-full bg-[#f97316] text-white flex items-center justify-center shrink-0 overflow-hidden border-2 border-[#1a140f]">
+                {ac.logo
+                  ? <img src={ac.logo} alt="" className="w-full h-full object-cover" />
+                  : <Building2 size={16} />
+                }
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-bold text-gray-900 truncate">{ac.name}</p>
+                <p className="text-[11px] text-gray-400">{ac.isOwn ? "Your academy" : "Member"}</p>
+              </div>
+              {isActive ? (
+                <span className="flex items-center gap-1 text-[11px] font-bold text-brand-600 bg-white border border-brand-200 px-2.5 py-1 rounded-full shrink-0">
+                  <Check size={10} strokeWidth={3} />Active
+                </span>
+              ) : (
+                <button
+                  onClick={() => setActive(ac.id, ac.name, ac.logo)}
+                  disabled={!!switching}
+                  className="text-[11px] font-bold text-gray-500 border border-gray-200 hover:border-brand-400 hover:text-brand-600 px-3 py-1 rounded-full transition-all disabled:opacity-50 shrink-0">
+                  {switching === ac.id ? "…" : "Set Active"}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function MyProfileTab({ onBack }) {
   const { user, realUser, logout, updateUser, switchToRole, revertRole } = useAuth();
@@ -156,6 +249,9 @@ function MyProfileTab({ onBack }) {
             </div>
           </div>
         )}
+
+        {/* My Academies (coaches only) */}
+        <MyAcademiesSection />
 
         {/* Connected accounts */}
         <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">

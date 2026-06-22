@@ -1,6 +1,8 @@
-import { useState, useEffect } from "react";
-import { Bell, Eye, X } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Bell, Eye, X, Check, Building2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { getCoachInvitations, respondToInvitation } from "../lib/db";
+import { cn } from "../lib/utils";
 
 const PAGE_TITLES = {
   home:        "Dashboard",
@@ -19,10 +21,73 @@ const ROLE_COLORS = {
   student: "bg-emerald-500",
 };
 
+function NotificationDropdown({ invitations, onRespond, onClose }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handler(e) {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  return (
+    <div ref={ref}
+      className="absolute right-0 top-[calc(100%+10px)] w-[340px] bg-white rounded-[20px] border-2 border-[#1a140f] shadow-[0_8px_0_#1a140f,0_12px_32px_rgba(0,0,0,0.15)] z-50 overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <p className="text-[13px] font-black text-gray-900">Academy Invitations</p>
+        <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors">
+          <X size={13} />
+        </button>
+      </div>
+
+      {invitations.length === 0 ? (
+        <div className="flex flex-col items-center py-10 text-center px-5">
+          <Bell size={28} className="text-gray-200 mb-3" />
+          <p className="text-[13px] font-bold text-gray-500">No pending invitations</p>
+          <p className="text-[11px] text-gray-400 mt-1">You&apos;re all caught up!</p>
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-50 max-h-[380px] overflow-y-auto">
+          {invitations.map(inv => (
+            <div key={inv.id} className="px-5 py-4">
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-10 h-10 rounded-full bg-[#f97316] text-white font-black text-[14px] flex items-center justify-center shrink-0 overflow-hidden border-2 border-[#1a140f]">
+                  {inv.academyLogo
+                    ? <img src={inv.academyLogo} alt="" className="w-full h-full object-cover" />
+                    : <Building2 size={16} />
+                  }
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-bold text-gray-900 leading-tight">{inv.academyName || `Academy #${inv.academyId}`}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Invited you to join as coach</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => onRespond(inv.id, false)}
+                  className="flex-1 h-9 rounded-xl border-2 border-gray-200 text-[12px] font-bold text-gray-600 hover:border-red-300 hover:text-red-600 transition-all">
+                  Decline
+                </button>
+                <button onClick={() => onRespond(inv.id, true)}
+                  className="flex-[2] h-9 rounded-xl bg-[#f97316] hover:bg-[#ea6c00] text-white text-[12px] font-bold transition-all flex items-center justify-center gap-1.5">
+                  <Check size={12} strokeWidth={3} />Accept
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Header({ onProfile, currentPage }) {
   const { user, realUser, revertRole } = useAuth();
-  const [logo, setLogo] = useState(() => localStorage.getItem("ca_academy_logo") || "");
-  const [academyName, setAcademyName] = useState(() => localStorage.getItem("ca_academy_name") || "");
+  const [logo,         setLogo]         = useState(() => localStorage.getItem("ca_academy_logo") || "");
+  const [academyName,  setAcademyName]  = useState(() => localStorage.getItem("ca_academy_name") || "");
+  const [invitations,  setInvitations]  = useState([]);
+  const [showNotifs,   setShowNotifs]   = useState(false);
 
   useEffect(() => {
     const sync = () => {
@@ -32,6 +97,23 @@ export default function Header({ onProfile, currentPage }) {
     window.addEventListener("ca-logo-update", sync);
     return () => window.removeEventListener("ca-logo-update", sync);
   }, []);
+
+  // Load pending invitations for coaches
+  useEffect(() => {
+    if (user?.role !== "coach" || !user?.id) return;
+    getCoachInvitations(user.id).then(setInvitations).catch(() => {});
+  }, [user?.id, user?.role]);
+
+  async function handleRespond(invitationId, accept) {
+    try {
+      await respondToInvitation(invitationId, accept);
+      setInvitations(prev => prev.filter(i => i.id !== invitationId));
+    } catch (err) {
+      console.error("Failed to respond to invitation:", err);
+    }
+  }
+
+  const pendingCount = invitations.length;
 
   return (
     <header className="shrink-0 border-b-2 border-[#1a140f] bg-[#fffaf2]">
@@ -75,18 +157,31 @@ export default function Header({ onProfile, currentPage }) {
           </div>
         </div>
 
-        {/* Right: notification + profile icon only */}
+        {/* Right: notification + profile */}
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            className="relative flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#1a140f] bg-[#fff4e7] text-[#1a140f] shadow-[0_4px_0_#1a140f] transition-transform hover:-translate-y-0.5"
-            type="button"
-            aria-label="Notifications"
-          >
-            <Bell size={16} />
-            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-[#1a140f] bg-[#f97316] px-0.5 text-[9px] font-black text-white">
-              3
-            </span>
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowNotifs(v => !v)}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#1a140f] bg-[#fff4e7] text-[#1a140f] shadow-[0_4px_0_#1a140f] transition-transform hover:-translate-y-0.5"
+              type="button"
+              aria-label="Notifications"
+            >
+              <Bell size={16} />
+              {pendingCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-[#1a140f] bg-[#f97316] px-0.5 text-[9px] font-black text-white">
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+
+            {showNotifs && (
+              <NotificationDropdown
+                invitations={invitations}
+                onRespond={handleRespond}
+                onClose={() => setShowNotifs(false)}
+              />
+            )}
+          </div>
 
           <button
             onClick={onProfile}
