@@ -390,6 +390,81 @@ export async function saveHomeworkPuzzleResult(homeworkId, studentId, puzzleId, 
   }
 }
 
+// ── Homework submissions (student answers for coach review) ───────────────────
+
+function hwSubmissionFromDb(row) {
+  return {
+    id:          row.id,
+    homeworkId:  row.homework_id,
+    studentId:   row.student_id,
+    puzzleId:    row.puzzle_id,
+    moves:       row.moves || [],
+    submittedAt: row.submitted_at,
+    reviewed:    row.reviewed,
+    correct:     row.correct ?? null,
+    studentName: row.profiles?.name || null,
+  }
+}
+
+export async function submitPuzzleAnswer(homeworkId, studentId, puzzleId, moves) {
+  const { error } = await db()
+    .from('homework_submissions')
+    .upsert({
+      homework_id:  homeworkId,
+      student_id:   studentId,
+      puzzle_id:    puzzleId,
+      moves:        moves || [],
+      submitted_at: new Date().toISOString(),
+      reviewed:     false,
+      correct:      null,
+    }, { onConflict: 'homework_id,student_id,puzzle_id' })
+  if (error) {
+    console.error('[homework_submissions] submit failed:', error.message)
+    throw error
+  }
+}
+
+export async function getStudentSubmissions(homeworkId, studentId) {
+  const { data, error } = await db()
+    .from('homework_submissions')
+    .select('*')
+    .eq('homework_id', homeworkId)
+    .eq('student_id', studentId)
+  if (error) { console.error('[homework_submissions] load failed:', error.message); return [] }
+  return (data || []).map(hwSubmissionFromDb)
+}
+
+export async function getAllSubmissionsForHomework(homeworkId) {
+  const { data, error } = await db()
+    .from('homework_submissions')
+    .select('*, profiles(name)')
+    .eq('homework_id', homeworkId)
+  if (error) { console.error('[homework_submissions] coach load failed:', error.message); return [] }
+  return (data || []).map(hwSubmissionFromDb)
+}
+
+export async function getFullSubmissionsForStudent(studentId) {
+  const { data, error } = await db()
+    .from('homework_submissions')
+    .select('homework_id, puzzle_id, moves, submitted_at, reviewed, correct')
+    .eq('student_id', studentId)
+  if (error) { console.error('[homework_submissions] student full load failed:', error.message); return [] }
+  return data || []
+}
+
+export async function saveSubmissionReview(homeworkId, studentId, puzzleId, correct) {
+  const { error } = await db()
+    .from('homework_submissions')
+    .update({ reviewed: true, correct })
+    .eq('homework_id', homeworkId)
+    .eq('student_id', studentId)
+    .eq('puzzle_id', puzzleId)
+  if (error) {
+    console.error('[homework_submissions] review failed:', error.message)
+    throw error
+  }
+}
+
 // ── Race scores ───────────────────────────────────────────────────────────────
 
 function scoreFromDb(row) {

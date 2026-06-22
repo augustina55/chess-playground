@@ -16,9 +16,9 @@ import {
   createHomework, deleteHomework,
   getBatches, getPgns, getPuzzlesByPgnId,
   getProfiles, getProfilesByAcademy, getAcademies,
-  getHomeworkProgress, saveHomeworkPuzzleResult,
-  getAllHomeworkProgressForStudent, getFullHomeworkProgressForStudent,
-  getHomeworkProgressForCoach,
+  submitPuzzleAnswer, getStudentSubmissions,
+  getAllSubmissionsForHomework, getFullSubmissionsForStudent,
+  saveSubmissionReview,
 } from "../lib/db";
 
 const inputCls =
@@ -29,47 +29,6 @@ function Field({ label, children }) {
     <div className="space-y-2.5">
       <label className="text-[11px] font-bold uppercase tracking-[0.22em] text-gray-400">{label}</label>
       {children}
-    </div>
-  );
-}
-
-// ── trim solution so it always ends on the player's move ─────────────────────
-
-function trimSolution(sol) {
-  return sol.length % 2 === 0 ? sol.slice(0, -1) : [...sol];
-}
-
-// ── board helpers ─────────────────────────────────────────────────────────────
-
-function computeSquareStyles(square, currentFen) {
-  const game  = new Chess(currentFen);
-  const moves = game.moves({ square, verbose: true });
-  const styles = { [square]: { backgroundColor: "rgba(234,88,12,0.55)" } };
-  moves.forEach(m => {
-    styles[m.to] = { backgroundColor: game.get(m.to) ? "rgba(234,88,12,0.40)" : "rgba(0,0,0,0.18)" };
-  });
-  return styles;
-}
-
-// ── Ring progress ─────────────────────────────────────────────────────────────
-
-function RingProgress({ done, total }) {
-  const pct  = total ? Math.round((done / total) * 100) : 0;
-  const r    = 38;
-  const circ = 2 * Math.PI * r;
-  return (
-    <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
-      <svg className="absolute inset-0 -rotate-90" width="96" height="96" viewBox="0 0 96 96">
-        <circle cx="48" cy="48" r={r} fill="none" stroke="#f3f4f6" strokeWidth="7" />
-        <circle cx="48" cy="48" r={r} fill="none" stroke="#16a34a" strokeWidth="7"
-          strokeLinecap="round" strokeDasharray={circ}
-          strokeDashoffset={circ - (circ * pct / 100)}
-          style={{ transition: "stroke-dashoffset 0.5s ease" }} />
-      </svg>
-      <div className="relative text-center">
-        <p className="text-[18px] font-black text-gray-900 leading-none">{pct}%</p>
-        <p className="text-[10px] text-gray-400 mt-0.5">{done}/{total}</p>
-      </div>
     </div>
   );
 }
@@ -96,233 +55,172 @@ function HWPlayer({ hw, onBack }) {
   const { user }   = useAuth();
   const boardTheme = BOARD_THEMES.find(t => t.id === (user?.settings?.boardTheme ?? "brown")) || BOARD_THEMES[0];
 
-  const [puzzles,   setPuzzles]   = useState([]);
-  const [puzzlesOk, setPuzzlesOk] = useState(false);
+  const [puzzles,        setPuzzles]        = useState([]);
+  const [puzzlesOk,      setPuzzlesOk]      = useState(false);
+  const [idx,            setIdx]            = useState(0);
+  const [boardFen,       setBoardFen]       = useState("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+  const [movesUCI,       setMovesUCI]       = useState([]);
+  const [movesSAN,       setMovesSAN]       = useState([]);
+  const [submissionsMap, setSubmissionsMap] = useState({});
+  const [submitting,     setSubmitting]     = useState(false);
+  const [saveError,      setSaveError]      = useState(null);
+  const posListRef = useRef(null);
 
-  const [idx,          setIdx]          = useState(0);
-  const [fen,          setFen]          = useState("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-  const [orientation,  setOrientation]  = useState("white");
-  const [solution,     setSolution]     = useState([]);
-  const [solutionStep, setSolutionStep] = useState(0);
-  const [feedback,     setFeedback]     = useState("Loading puzzles…");
-  const [selectedSq,   setSelectedSq]   = useState(null);
-  const [sqStyles,     setSqStyles]     = useState({});
-  const [showHint,     setShowHint]     = useState(false);
-  const [jumpToNext,   setJumpToNext]   = useState(false);
-  const [correctSet,   setCorrectSet]   = useState(new Set());
-  const [wrongMap,     setWrongMap]     = useState({});
-  const [times,        setTimes]        = useState([]);
-  const [saveError,    setSaveError]    = useState(null);
-  const startRef      = useRef(Date.now());
-  const processingRef = useRef(false);
-  const posListRef    = useRef(null);
-  // keep a stable ref of wrongMap for use inside async save callbacks
-  const wrongMapRef   = useRef({});
-  useEffect(() => { wrongMapRef.current = wrongMap; }, [wrongMap]);
+  function replayMoves(startFen, uciMoves) {
+    let g = new Chess(startFen);
+    for (const uci of (uciMoves || [])) {
+      try { g.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || "q" }); } catch {}
+    }
+    return g.fen();
+  }
 
-  // Load puzzles + existing progress together
+  function uciToSanArr(startFen, uciMoves) {
+    let g = new Chess(startFen);
+    const sans = [];
+    for (const uci of (uciMoves || [])) {
+      try {
+        const m = g.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || "q" });
+        if (m) sans.push(m.san);
+      } catch {}
+    }
+    return sans;
+  }
+
   useEffect(() => {
-    if (!hw.pgnId) { setPuzzlesOk(true); setFeedback("No PGN attached."); return; }
-
-    const progressPromise = (user?.id && hw.id)
-      ? getHomeworkProgress(hw.id, user.id)
-      : Promise.resolve([]);
-
-    Promise.all([getPuzzlesByPgnId(hw.pgnId), progressPromise]).then(([p, progress]) => {
-      setPuzzles(p);
-
-      // Restore saved progress
-      const solvedIds  = new Set(progress.filter(r => r.solved).map(r => r.puzzleId));
-      const wrongCounts = {};
-      progress.forEach(r => { if (r.wrongCount > 0) wrongCounts[r.puzzleId] = r.wrongCount; });
-      setCorrectSet(solvedIds);
-      setWrongMap(wrongCounts);
-      wrongMapRef.current = wrongCounts;
-
-      if (p.length > 0) {
-        // Resume at first unsolved puzzle (or 0 if all done)
-        const firstUnsolved = p.findIndex(pzl => !solvedIds.has(pzl.id));
-        const startIdx = firstUnsolved >= 0 ? firstUnsolved : 0;
-        setIdx(startIdx);
-        setFen(p[startIdx].fen);
-        setOrientation(new Chess(p[startIdx].fen).turn() === "b" ? "black" : "white");
-        setSolution(trimSolution(p[startIdx].solution));
-        setFeedback(
-          solvedIds.size === p.length
-            ? "All done! Great work."
-            : firstUnsolved > 0
-              ? `Resuming from puzzle ${firstUnsolved + 1}`
-              : "Find the best move!"
-        );
-      } else {
-        setFeedback("No puzzles in this PGN.");
+    if (!hw.pgnId) { setPuzzlesOk(true); return; }
+    Promise.all([
+      getPuzzlesByPgnId(hw.pgnId),
+      user?.id ? getStudentSubmissions(hw.id, user.id) : Promise.resolve([]),
+    ]).then(([pzls, subs]) => {
+      setPuzzles(pzls);
+      const smap = {};
+      subs.forEach(s => { smap[s.puzzleId] = s; });
+      setSubmissionsMap(smap);
+      const firstUnsub = pzls.findIndex(p => !smap[p.id]);
+      const start = firstUnsub >= 0 ? firstUnsub : 0;
+      setIdx(start);
+      if (pzls[start]) {
+        const sub = smap[pzls[start].id];
+        setBoardFen(sub?.moves?.length ? replayMoves(pzls[start].fen, sub.moves) : pzls[start].fen);
       }
       setPuzzlesOk(true);
     });
   }, [hw.pgnId, hw.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function loadPuzzle(i) {
-    processingRef.current = false;
     const pzl = puzzles[i];
     if (!pzl) return;
     setIdx(i);
-    setFen(pzl.fen);
-    setOrientation(new Chess(pzl.fen).turn() === "b" ? "black" : "white");
-    setSolution(trimSolution(pzl.solution));
-    setSolutionStep(0);
-    setFeedback("Find the best move!");
-    setSelectedSq(null);
-    setSqStyles({});
-    setShowHint(false);
-    startRef.current = Date.now();
+    setMovesUCI([]);
+    setMovesSAN([]);
+    const sub = submissionsMap[pzl.id];
+    setBoardFen(sub?.moves?.length ? replayMoves(pzl.fen, sub.moves) : pzl.fen);
     setTimeout(() => {
-      const el = posListRef.current?.querySelector(`[data-idx="${i}"]`);
-      el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      posListRef.current?.querySelector(`[data-idx="${i}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }, 50);
   }
 
-  useEffect(() => { setSelectedSq(null); setSqStyles({}); setShowHint(false); }, [fen]);
-
-  const hintStyles = showHint && solution[solutionStep] ? (() => {
-    const uci = solution[solutionStep];
-    return {
-      [uci.slice(0, 2)]: { backgroundColor: "rgba(234, 197, 0, 0.7)" },
-      [uci.slice(2, 4)]: { backgroundColor: "rgba(234, 197, 0, 0.5)" },
-    };
-  })() : {};
-
-  const mergedStyles = { ...sqStyles, ...hintStyles };
-
-  function handleMove(from, to) {
-    if (processingRef.current || !puzzlesOk || !puzzles.length || !fen || !solution.length) return "invalid";
-    const testGame = new Chess(fen);
-    let testMove;
-    try { testMove = testGame.move({ from, to, promotion: "q" }); } catch { testMove = null; }
-    if (!testMove) return "invalid";
-
-    const uci      = from + to;
-    const expected = solution[solutionStep].slice(0, 4);
-    const pzlId    = puzzles[idx]?.id;
-
-    if (uci !== expected) {
-      setWrongMap(prev => ({ ...prev, [pzlId]: (prev[pzlId] || 0) + 1 }));
-      setFeedback("Wrong! Try again.");
-      return "wrong";
-    }
-
-    const game = new Chess(fen);
-    let move;
-    try { move = game.move({ from, to, promotion: solution[solutionStep][4] || "q" }); } catch { return "invalid"; }
-    if (!move) return "invalid";
-
-    const newFen   = game.fen();
-    const nextStep = solutionStep + 1;
-
-    if (nextStep >= solution.length) {
-      setFen(newFen);
-      const elapsed = Math.round((Date.now() - startRef.current) / 1000);
-      setTimes(prev => [...prev, elapsed]);
-      setCorrectSet(prev => new Set([...prev, pzlId]));
-      setFeedback("Correct! ✓");
-
-      // Persist progress to DB
-      if (user?.id && hw.id && pzlId) {
-        saveHomeworkPuzzleResult(hw.id, user.id, pzlId, {
-          solved:      true,
-          wrongCount:  wrongMapRef.current[pzlId] || 0,
-          timeSeconds: elapsed,
-        }).catch(err => {
-          console.error('[HWPlayer] save failed:', err);
-          setSaveError(err?.message || 'Progress could not be saved');
-        });
-      }
-
-      if (jumpToNext && idx < puzzles.length - 1) {
-        setTimeout(() => loadPuzzle(idx + 1), 800);
-      }
-      return "correct";
-    }
-
-    setFen(newFen);
-    setFeedback("Good! Keep going...");
-    processingRef.current = true;
-    setTimeout(() => {
-      const opp = solution[nextStep];
-      const g2 = new Chess(newFen);
-      let oppOk = false;
-      try { oppOk = !!g2.move({ from: opp.slice(0, 2), to: opp.slice(2, 4), promotion: opp[4] || "q" }); } catch {}
-      setFen(oppOk ? g2.fen() : newFen);
-      setSolutionStep(oppOk ? nextStep + 1 : nextStep);
-      processingRef.current = false;
-    }, 400);
-    return "correct";
+  function handleDrop({ sourceSquare, targetSquare }) {
+    const pzl = puzzles[idx];
+    if (!pzl || submissionsMap[pzl.id]) return false;
+    let g;
+    try { g = new Chess(boardFen); } catch { return false; }
+    let move = null;
+    try { move = g.move({ from: sourceSquare, to: targetSquare, promotion: "q" }); } catch {}
+    if (!move) return false;
+    setBoardFen(g.fen());
+    setMovesUCI(prev => [...prev, sourceSquare + targetSquare]);
+    setMovesSAN(prev => [...prev, move.san]);
+    return true;
   }
 
-  function clearSel() { setSelectedSq(null); setSqStyles({}); }
-
-  function onDrop({ sourceSquare, targetSquare }) {
-    clearSel();
-    return handleMove(sourceSquare, targetSquare) === "correct";
+  function reset() {
+    const pzl = puzzles[idx];
+    if (!pzl || submissionsMap[pzl.id]) return;
+    setBoardFen(pzl.fen);
+    setMovesUCI([]);
+    setMovesSAN([]);
   }
 
-  function onSquareClick({ square }) {
-    if (selectedSq) {
-      if (selectedSq === square) { clearSel(); return; }
-      const r = handleMove(selectedSq, square);
-      clearSel();
-      if (r === "invalid") {
-        const g = new Chess(fen);
-        const p = g.get(square);
-        if (p && p.color === g.turn()) {
-          setSelectedSq(square);
-          setSqStyles(computeSquareStyles(square, fen));
-        }
-      }
-      return;
-    }
-    const g = new Chess(fen);
-    const p = g.get(square);
-    if (p && p.color === g.turn()) {
-      setSelectedSq(square);
-      setSqStyles(computeSquareStyles(square, fen));
+  async function submit() {
+    const pzl = puzzles[idx];
+    if (!pzl || !user?.id || movesUCI.length === 0 || submitting) return;
+    setSubmitting(true);
+    setSaveError(null);
+    try {
+      await submitPuzzleAnswer(hw.id, user.id, pzl.id, movesUCI);
+      const newSub = { puzzleId: pzl.id, moves: [...movesUCI], correct: null, reviewed: false, submittedAt: new Date().toISOString() };
+      setSubmissionsMap(prev => {
+        const next = { ...prev, [pzl.id]: newSub };
+        // Navigate to next unsubmitted puzzle
+        const nextIdx = puzzles.findIndex((p, i) => i > idx && !next[p.id]);
+        if (nextIdx >= 0) setTimeout(() => loadPuzzle(nextIdx), 600);
+        return next;
+      });
+    } catch (err) {
+      setSaveError(err?.message || "Failed to submit");
+    } finally {
+      setSubmitting(false);
     }
   }
 
-  const done       = correctSet.size;
+  const pzl        = puzzles[idx];
+  const currentSub = pzl ? submissionsMap[pzl.id] : null;
   const total      = puzzles.length;
-  const wrongTotal = Object.values(wrongMap).reduce((a, b) => a + b, 0);
-
-  const feedbackType = feedback.includes("Correct") || feedback.includes("Good") || feedback.includes("✓")
-    ? "good" : feedback.includes("Wrong") ? "bad" : "neutral";
-
+  const submitted  = Object.keys(submissionsMap).length;
+  const correct    = Object.values(submissionsMap).filter(s => s.correct === true).length;
+  const wrong      = Object.values(submissionsMap).filter(s => s.correct === false).length;
+  const reviewed   = Object.values(submissionsMap).filter(s => s.reviewed).length;
+  const orientation = pzl ? (new Chess(pzl.fen).turn() === "b" ? "black" : "white") : "white";
   const circleItems = getCircleItems(total, idx);
+
+  const submittedSan = useMemo(() => {
+    if (!pzl || !currentSub?.moves?.length) return [];
+    return uciToSanArr(pzl.fen, currentSub.moves);
+  }, [pzl, currentSub]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex flex-col bg-white overflow-hidden" style={{ height: "calc(100vh - 70px)" }}>
-
       {saveError && (
-        <div className="flex items-center gap-3 px-5 py-2.5 bg-red-50 border-b border-red-200 text-red-700 text-[12px] font-medium">
+        <div className="flex items-center gap-3 px-5 py-2.5 bg-red-50 border-b border-red-200 text-red-700 text-[12px] font-medium shrink-0">
           <X size={13} strokeWidth={3} className="shrink-0" />
-          <span>Progress not saved: {saveError}. Open browser console (F12) for details. Make sure the DB migration (supabase/schema.sql) has been run in Supabase.</span>
+          <span>Could not submit: {saveError}</span>
           <button onClick={() => setSaveError(null)} className="ml-auto shrink-0 text-red-400 hover:text-red-600"><X size={13} /></button>
         </div>
       )}
 
-      {/* ── Content ── */}
-      <div className="flex flex-col lg:flex-row flex-1 gap-4 p-4 overflow-hidden" style={{ minHeight: 0 }}>
+      {/* Header */}
+      <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-gray-100">
+        <button onClick={onBack}
+          className="w-9 h-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50 transition-colors shrink-0">
+          <ChevronLeft size={16} />
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] text-gray-400 font-medium">{hw.id}</p>
+          <h1 className="text-[15px] font-black text-gray-900 leading-tight truncate">{hw.title}</h1>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <span className="text-[12px] text-gray-500">{submitted}/{total} answered</span>
+          {reviewed > 0 && (
+            <>
+              <span className="text-[12px] font-bold text-emerald-600">{correct} ✓</span>
+              <span className="text-[12px] font-bold text-red-500">{wrong} ✗</span>
+            </>
+          )}
+        </div>
+      </div>
 
-        {/* Board column */}
+      {/* Main content */}
+      <div className="flex flex-1 gap-4 p-4 overflow-hidden" style={{ minHeight: 0 }}>
+        {/* Board */}
         <div className="flex-1 flex items-center justify-center min-w-0 overflow-hidden">
           <div style={{ width: "min(70%, calc(100vh - 140px))", maxWidth: "min(70%, calc(100vh - 140px))" }}>
             <div className="overflow-hidden rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
               <Chessboard options={{
-                position: fen,
+                position: boardFen,
                 boardOrientation: orientation,
-                onPieceDrop: onDrop,
-                onSquareClick: onSquareClick,
-                allowDragging: puzzlesOk && puzzles.length > 0,
-                canDragPiece: ({ piece }) => piece.pieceType?.[0] === new Chess(fen).turn(),
-                squareStyles: mergedStyles,
+                onPieceDrop: handleDrop,
+                allowDragging: puzzlesOk && !!pzl && !currentSub,
                 darkSquareStyle:  { backgroundColor: boardTheme.dark },
                 lightSquareStyle: { backgroundColor: boardTheme.light },
                 boardStyle: { borderRadius: 0 },
@@ -332,112 +230,97 @@ function HWPlayer({ hw, onBack }) {
         </div>
 
         {/* Right panel */}
-        <div className="w-full lg:w-[340px] shrink-0 flex flex-col gap-4 overflow-y-auto">
+        <div className="w-[300px] shrink-0 flex flex-col gap-4 overflow-y-auto">
 
-          {/* ── Stats card ── */}
+          {/* Puzzle info / answer card */}
           <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-baseline gap-2 mb-4">
-                  <span className="text-[15px] font-black text-gray-900">{hw.id}</span>
-                  <span className="text-[12px] text-gray-400">{total} positions</span>
-                </div>
-                <div className="flex gap-8">
-                  <div>
-                    <p className="text-[11px] text-gray-400 mb-1">Correct</p>
-                    <p className="text-[34px] font-black text-emerald-500 leading-none">{done}</p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-gray-400 mb-1">Wrong</p>
-                    <p className="text-[34px] font-black text-red-500 leading-none">{wrongTotal}</p>
-                  </div>
-                </div>
-              </div>
-              <RingProgress done={done} total={total} />
+            <div className="flex items-baseline gap-2 mb-4">
+              <span className="text-[15px] font-black text-gray-900">Puzzle {idx + 1}</span>
+              <span className="text-[12px] text-gray-400">of {total}</span>
             </div>
 
-            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
-              <span className="text-[13px] text-gray-600 font-medium">Auto open next puzzle</span>
-              <button type="button" onClick={() => setJumpToNext(v => !v)}
-                className={cn("w-12 h-6 rounded-full transition-all flex items-center px-0.5 shrink-0",
-                  jumpToNext ? "bg-emerald-500 justify-end" : "bg-gray-200 justify-start")}>
-                <span className="w-5 h-5 rounded-full bg-white shadow-sm" />
-              </button>
-            </div>
-          </div>
-
-          {/* ── Feedback + puzzle circles card ── */}
-          <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-5 flex flex-col gap-5">
-
-            {/* Feedback area */}
-            <div className="flex flex-col items-center py-5 border-b border-gray-100">
-              <AnimatePresence mode="wait">
-                <motion.div key={feedbackType}
-                  initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.8, opacity: 0 }} transition={{ duration: 0.18 }}
-                  className="flex flex-col items-center gap-2">
-                  <div className={cn(
-                    "w-14 h-14 rounded-full border-2 flex items-center justify-center mb-1",
-                    feedbackType === "good" ? "border-emerald-500 text-emerald-500 bg-emerald-50"
-                    : feedbackType === "bad" ? "border-red-500 text-red-500 bg-red-50"
-                    : "border-gray-200 text-gray-400 bg-gray-50"
-                  )}>
-                    {feedbackType === "good" ? <Check size={26} strokeWidth={3} />
-                    : feedbackType === "bad"  ? <X    size={26} strokeWidth={3} />
-                    : <span className="text-[22px] leading-none">♟</span>}
-                  </div>
-                  <p className={cn("text-[22px] font-black leading-tight",
-                    feedbackType === "good" ? "text-gray-900"
-                    : feedbackType === "bad" ? "text-red-600"
-                    : "text-gray-700")}>
-                    {feedbackType === "good" ? "Correct !!"
-                    : feedbackType === "bad" ? "Wrong!"
-                    : "Your turn"}
+            {/* Moves display */}
+            <div className="min-h-[48px] mb-4">
+              {currentSub ? (
+                <div>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Your answer</p>
+                  <p className="font-mono text-[13px] text-gray-700">
+                    {submittedSan.length ? submittedSan.join(" ") : <span className="italic text-gray-400">(no moves)</span>}
                   </p>
-                  <p className="text-[12px] text-gray-400">
-                    {feedbackType === "good" ? "Great job! Keep it up."
-                    : feedbackType === "bad" ? "Try again."
-                    : "Find the best move!"}
-                  </p>
-                </motion.div>
-              </AnimatePresence>
-            </div>
-
-            {/* Puzzle circles */}
-            <div>
-              <p className="text-[12px] font-bold text-gray-500 mb-3">Puzzles</p>
-              {!puzzlesOk ? (
-                <p className="text-[12px] text-gray-400">Loading…</p>
+                </div>
+              ) : movesUCI.length > 0 ? (
+                <div>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Your moves</p>
+                  <p className="font-mono text-[13px] text-gray-700">{movesSAN.join(" ")}</p>
+                </div>
               ) : (
-                <div className="flex flex-wrap gap-2 items-center">
-                  {circleItems.map((item, ki) => {
-                    if (typeof item === "string") {
-                      return <span key={item + ki} className="text-[13px] text-gray-300 font-bold px-0.5">...</span>;
-                    }
-                    const pzl       = puzzles[item];
-                    const isCurrent = item === idx;
-                    const isSolved  = correctSet.has(pzl?.id);
-                    const hasWrong  = pzl && (wrongMap[pzl.id] || 0) > 0;
-                    return (
-                      <button key={item} type="button" onClick={() => loadPuzzle(item)}
-                        className={cn(
-                          "w-9 h-9 rounded-full text-[12px] font-black transition-all flex items-center justify-center shrink-0",
-                          isSolved  ? "bg-emerald-500 text-white"
-                          : isCurrent ? "bg-gray-900 text-white"
-                          : hasWrong  ? "border-2 border-red-300 text-red-500"
-                          : "border-2 border-gray-200 text-gray-400 hover:border-gray-400 hover:text-gray-700"
-                        )}>
-                        {item + 1}
-                      </button>
-                    );
-                  })}
-                </div>
+                <p className="text-[13px] text-gray-400 italic">Make your move on the board…</p>
               )}
             </div>
 
-            {/* Next button */}
-            <button
-              type="button"
+            {/* Status / action */}
+            {currentSub ? (
+              currentSub.reviewed ? (
+                currentSub.correct ? (
+                  <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                    <Check size={16} className="text-emerald-600 shrink-0" strokeWidth={3} />
+                    <span className="text-[13px] font-bold text-emerald-700">Correct!</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
+                    <X size={16} className="text-red-500 shrink-0" strokeWidth={3} />
+                    <span className="text-[13px] font-bold text-red-600">Wrong</span>
+                  </div>
+                )
+              ) : (
+                <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
+                  <Clock size={14} className="text-blue-500 shrink-0" />
+                  <span className="text-[12px] font-medium text-blue-700">Submitted — awaiting review</span>
+                </div>
+              )
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={reset} disabled={movesUCI.length === 0}
+                  className="flex-1 h-10 rounded-xl border-2 border-gray-200 text-[12px] font-bold text-gray-600 hover:border-gray-300 disabled:opacity-40 transition-colors">
+                  Reset
+                </button>
+                <button onClick={submit} disabled={submitting || movesUCI.length === 0}
+                  className="flex-[2] h-10 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-bold disabled:opacity-40 transition-colors">
+                  {submitting ? "Submitting…" : "Submit Answer"}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Puzzle nav card */}
+          <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-5">
+            <p className="text-[12px] font-bold text-gray-500 mb-3">All Puzzles</p>
+            {!puzzlesOk ? (
+              <p className="text-[12px] text-gray-400">Loading…</p>
+            ) : (
+              <div ref={posListRef} className="flex flex-wrap gap-2 items-center mb-4">
+                {circleItems.map((item, ki) => {
+                  if (typeof item === "string") return <span key={item + ki} className="text-gray-300 font-bold px-0.5">...</span>;
+                  const pz  = puzzles[item];
+                  const sub = pz ? submissionsMap[pz.id] : null;
+                  const isCurrent = item === idx;
+                  return (
+                    <button key={item} data-idx={item} type="button" onClick={() => loadPuzzle(item)}
+                      className={cn(
+                        "w-9 h-9 rounded-full text-[12px] font-black transition-all flex items-center justify-center shrink-0",
+                        sub?.correct === true  ? "bg-emerald-500 text-white" :
+                        sub?.correct === false ? "bg-red-500 text-white" :
+                        sub                    ? "bg-blue-500 text-white" :
+                        isCurrent              ? "bg-gray-900 text-white" :
+                                                 "border-2 border-gray-200 text-gray-400 hover:border-gray-400 hover:text-gray-700"
+                      )}>
+                      {item + 1}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <button type="button"
               onClick={() => loadPuzzle(Math.min(idx + 1, puzzles.length - 1))}
               disabled={idx >= puzzles.length - 1}
               className="w-full h-12 rounded-2xl bg-[#f97316] hover:bg-[#ea6c00] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[14px] font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-orange-500/20">
@@ -445,6 +328,12 @@ function HWPlayer({ hw, onBack }) {
             </button>
           </div>
 
+          {hw.notes && (
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+              <p className="text-[11px] font-bold text-amber-700 mb-1 uppercase tracking-wide">Instructions</p>
+              <p className="text-[12px] text-amber-800 leading-relaxed">{hw.notes}</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -549,12 +438,12 @@ function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
   const [sortBy,      setSortBy]      = useState('newest');
 
   function getStatus(hw) {
-    const p    = progressMap[hw.id];
-    const total  = p?.total  || 0;
-    const solved = p?.solved || 0;
-    const overdue = hw.dueDate && new Date(hw.dueDate) < new Date();
-    if (total > 0 && solved >= total) return 'completed';
-    if (solved > 0) return overdue ? 'overdue' : 'in-progress';
+    const p         = progressMap[hw.id];
+    const total     = p?.total     || 0;
+    const submitted = p?.submitted || 0;
+    const overdue   = hw.dueDate && new Date(hw.dueDate) < new Date();
+    if (total > 0 && submitted >= total) return 'completed';
+    if (submitted > 0) return overdue ? 'overdue' : 'in-progress';
     if (overdue && total > 0) return 'overdue';
     return 'not-started';
   }
@@ -568,23 +457,22 @@ function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
     const startOfWeek = new Date(now);
     startOfWeek.setDate(now.getDate() + diffToMon);
     startOfWeek.setHours(0, 0, 0, 0);
-    allProgress.filter(r => r.solved).forEach(r => {
-      const d = new Date(r.updated_at);
+    allProgress.forEach(r => {
+      const d = new Date(r.submitted_at);
       if (d >= startOfWeek) counts[(d.getDay() + 6) % 7]++;
     });
     return { days: DAYS, counts };
   }, [allProgress]);
 
-  const weeklySolved     = weeklyData.counts.reduce((a, b) => a + b, 0);
-  const totalTimeSecs    = allProgress.filter(r => r.solved).reduce((a, r) => a + (r.time_seconds || 0), 0);
-  const timeH            = Math.floor(totalTimeSecs / 3600);
-  const timeM            = Math.floor((totalTimeSecs % 3600) / 60);
+  const weeklySolved = weeklyData.counts.reduce((a, b) => a + b, 0);
+  const timeH        = 0;
+  const timeM        = 0;
 
-  // Recent activity: latest interaction per homework
+  // Recent activity: latest submission per homework
   const recentActivity = useMemo(() => {
     const byHw = {};
-    allProgress.filter(r => r.solved).forEach(r => {
-      const d = new Date(r.updated_at);
+    allProgress.forEach(r => {
+      const d = new Date(r.submitted_at);
       if (!byHw[r.homework_id] || d > byHw[r.homework_id].latest) {
         byHw[r.homework_id] = { count: (byHw[r.homework_id]?.count || 0) + 1, latest: d };
       } else {
@@ -593,8 +481,8 @@ function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
     });
     return Object.entries(byHw)
       .map(([hwId, { count, latest }]) => {
-        const hw  = homework.find(h => h.id === hwId);
-        const p   = progressMap[hwId];
+        const hw = homework.find(h => h.id === hwId);
+        const p  = progressMap[hwId];
         return { hwId, title: hw?.title || hwId, count, isCompleted: p && count >= p.total, latest };
       })
       .sort((a, b) => b.latest - a.latest)
@@ -674,11 +562,11 @@ function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
                 No homework here yet.
               </div>
             ) : filtered.map((hw, i) => {
-              const p      = progressMap[hw.id];
-              const solved = p?.solved || 0;
-              const total  = p?.total  || 0;
-              const pct    = total > 0 ? Math.round((solved / total) * 100) : 0;
-              const status = getStatus(hw);
+              const p         = progressMap[hw.id];
+              const submitted = p?.submitted || 0;
+              const total     = p?.total     || 0;
+              const pct       = total > 0 ? Math.round((submitted / total) * 100) : 0;
+              const status    = getStatus(hw);
               const st     = STATUS_CFG[status];
               const overdue = status === 'overdue' || (hw.dueDate && new Date(hw.dueDate) < new Date() && status !== 'completed');
               return (
@@ -707,7 +595,7 @@ function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
                             <div className="h-full rounded-full transition-all duration-500"
                               style={{ width: `${pct}%`, background: status === 'completed' ? '#22c55e' : '#f97316' }} />
                           </div>
-                          <p className="text-[11px] text-gray-400 mt-1">{solved}/{total} solved</p>
+                          <p className="text-[11px] text-gray-400 mt-1">{submitted}/{total} answered</p>
                         </div>
                       )}
                     </div>
@@ -803,83 +691,96 @@ function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
 // ── Coach Review Panel ────────────────────────────────────────────────────────
 
 function CoachReviewPanel({ hw, pgns, students, onClose }) {
-  const [rows,    setRows]    = useState([])
-  const [loading, setLoading] = useState(true)
+  const [submissions, setSubmissions] = useState([]);
+  const [puzzles,     setPuzzles]     = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [reviewing,   setReviewing]   = useState(false);
 
-  const totalPuzzles = pgns.find(p => p.id === hw.pgnId)?.puzzleCount || 0
+  const totalPuzzles = pgns.find(p => p.id === hw.pgnId)?.puzzleCount || 0;
 
   useEffect(() => {
-    setLoading(true)
-    getHomeworkProgressForCoach(hw.id).then(data => {
-      setRows(data)
-      setLoading(false)
-    })
-  }, [hw.id])
+    setLoading(true);
+    Promise.all([
+      getAllSubmissionsForHomework(hw.id),
+      hw.pgnId ? getPuzzlesByPgnId(hw.pgnId) : Promise.resolve([]),
+    ]).then(([subs, pzls]) => {
+      setSubmissions(subs);
+      setPuzzles(pzls);
+      setLoading(false);
+    });
+  }, [hw.id, hw.pgnId]);
 
-  // Group rows by student_id → per-student summary
+  const puzzleMap = useMemo(() => {
+    const m = {};
+    puzzles.forEach(p => { m[p.id] = p; });
+    return m;
+  }, [puzzles]);
+
   const byStudent = useMemo(() => {
-    const map = {}
-    rows.forEach(r => {
-      if (!map[r.student_id]) {
-        map[r.student_id] = { studentId: r.student_id, solved: 0, wrongTotal: 0, timeSecs: 0, lastAt: null }
+    const m = {};
+    submissions.forEach(sub => {
+      const sid = String(sub.studentId);
+      if (!m[sid]) {
+        const profile = students.find(p => String(p.id) === sid);
+        m[sid] = { studentId: sub.studentId, name: sub.studentName || profile?.name || `Student #${sub.studentId}`, submissions: [] };
       }
-      const s = map[r.student_id]
-      if (r.solved) { s.solved++; s.timeSecs += r.time_seconds || 0 }
-      s.wrongTotal += r.wrong_count || 0
-      const d = new Date(r.updated_at)
-      if (!s.lastAt || d > s.lastAt) s.lastAt = d
-    })
-    return Object.values(map)
-  }, [rows])
+      m[sid].submissions.push(sub);
+    });
+    return Object.values(m).sort((a, b) => b.submissions.length - a.submissions.length);
+  }, [submissions, students]);
 
-  // Merge with known student profiles
-  const enriched = useMemo(() => {
-    return byStudent.map(s => {
-      const profile = students.find(p => String(p.id) === String(s.studentId))
-      return { ...s, name: profile?.name || `Student #${s.studentId}`, username: profile?.username || '' }
-    }).sort((a, b) => b.solved - a.solved || a.wrongTotal - b.wrongTotal)
-  }, [byStudent, students])
+  const notSubmittedStudents = useMemo(() => {
+    const submittedIds = new Set(byStudent.map(s => String(s.studentId)));
+    return students.filter(p => p.batchCode === hw.batchName && !submittedIds.has(String(p.id)));
+  }, [byStudent, students, hw.batchName]);
 
-  // Students who haven't started yet
-  const notStartedStudents = useMemo(() => {
-    const startedIds = new Set(byStudent.map(s => String(s.studentId)))
-    return students.filter(p => p.batchCode === hw.batchName && !startedIds.has(String(p.id)))
-  }, [byStudent, students, hw.batchName])
+  const totalSubCount = submissions.length;
+  const reviewedCount = submissions.filter(s => s.reviewed).length;
+  const correctCount  = submissions.filter(s => s.correct === true).length;
+  const wrongCount    = submissions.filter(s => s.correct === false).length;
 
-  // Summary stats
-  const totalAttempted  = enriched.length
-  const avgSolved       = totalAttempted ? (enriched.reduce((a, s) => a + s.solved, 0) / totalAttempted).toFixed(1) : 0
-  const avgWrong        = totalAttempted ? (enriched.reduce((a, s) => a + s.wrongTotal, 0) / totalAttempted).toFixed(1) : 0
-  const completedCount  = enriched.filter(s => s.solved >= totalPuzzles && totalPuzzles > 0).length
-
-  function fmtAgo(d) {
-    if (!d) return ''
-    const diff = Date.now() - d.getTime()
-    const m = Math.floor(diff / 60000)
-    if (m < 1) return 'just now'
-    if (m < 60) return `${m}m ago`
-    const h = Math.floor(m / 60)
-    if (h < 24) return `${h}h ago`
-    return `${Math.floor(h / 24)}d ago`
+  function uciToSanSingle(pzl, uci) {
+    if (!uci || !pzl) return uci || "—";
+    try {
+      const g = new Chess(pzl.fen);
+      const m = g.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || "q" });
+      return m?.san || uci;
+    } catch { return uci; }
   }
 
-  function fmtTime(secs) {
-    if (!secs) return '—'
-    const m = Math.floor(secs / 60)
-    const s = secs % 60
-    return m > 0 ? `${m}m ${s}s` : `${s}s`
+  async function autoReview() {
+    setReviewing(true);
+    try {
+      const unreviewed = submissions.filter(s => !s.reviewed);
+      if (!unreviewed.length) return;
+      const updates = unreviewed.map(sub => {
+        const pzl = puzzleMap[sub.puzzleId];
+        if (!pzl || !sub.moves.length) return null;
+        const correctMove = pzl.solution[0]?.slice(0, 4);
+        const studentMove = sub.moves[0]?.slice(0, 4);
+        const isCorrect   = !!studentMove && !!correctMove && studentMove === correctMove;
+        return { studentId: sub.studentId, puzzleId: sub.puzzleId, correct: isCorrect };
+      }).filter(Boolean);
+      if (!updates.length) return;
+      await Promise.all(updates.map(u => saveSubmissionReview(hw.id, u.studentId, u.puzzleId, u.correct)));
+      setSubmissions(prev => prev.map(sub => {
+        const u = updates.find(x => x.studentId === sub.studentId && x.puzzleId === sub.puzzleId);
+        return u ? { ...sub, reviewed: true, correct: u.correct } : sub;
+      }));
+    } catch (err) {
+      console.error("Auto-review failed:", err);
+    } finally {
+      setReviewing(false);
+    }
   }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      {/* Backdrop */}
       <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
-
-      {/* Drawer */}
       <motion.div
-        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-        transition={{ type: 'spring', stiffness: 320, damping: 34 }}
-        className="relative w-full max-w-[520px] h-full bg-[#f6f8fc] border-l border-gray-200 shadow-2xl flex flex-col overflow-hidden">
+        initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
+        transition={{ type: "spring", stiffness: 320, damping: 34 }}
+        className="relative w-full max-w-[540px] h-full bg-[#f6f8fc] border-l border-gray-200 shadow-2xl flex flex-col overflow-hidden">
 
         {/* Header */}
         <div className="bg-white border-b border-gray-200 px-6 py-5 shrink-0">
@@ -887,9 +788,7 @@ function CoachReviewPanel({ hw, pgns, students, onClose }) {
             <div>
               <span className="text-[11px] font-bold text-brand-600 uppercase tracking-wider">{hw.id}</span>
               <h2 className="text-[18px] font-black text-gray-900 leading-tight mt-0.5">{hw.title}</h2>
-              <p className="text-[12px] text-gray-400 mt-1">
-                Batch: <strong>{hw.batchName}</strong> · {totalPuzzles} puzzles
-              </p>
+              <p className="text-[12px] text-gray-400 mt-1">Batch: <strong>{hw.batchName}</strong> · {totalPuzzles} puzzles</p>
             </div>
             <button onClick={onClose}
               className="w-9 h-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-400 hover:bg-gray-50 shrink-0 transition-colors">
@@ -897,104 +796,110 @@ function CoachReviewPanel({ hw, pgns, students, onClose }) {
             </button>
           </div>
 
-          {/* Summary pills */}
           <div className="grid grid-cols-4 gap-2 mt-4">
             {[
-              { label: 'Attempted', value: totalAttempted, color: 'text-brand-600' },
-              { label: 'Completed', value: completedCount, color: 'text-emerald-600' },
-              { label: 'Avg Solved', value: `${avgSolved}/${totalPuzzles}`, color: 'text-gray-800' },
-              { label: 'Avg Wrong', value: avgWrong, color: 'text-red-500' },
+              { label: "Students",  value: byStudent.length,                     color: "text-brand-600"  },
+              { label: "Reviewed",  value: `${reviewedCount}/${totalSubCount}`,  color: "text-gray-800"   },
+              { label: "Correct",   value: correctCount,                         color: "text-emerald-600" },
+              { label: "Wrong",     value: wrongCount,                           color: "text-red-500"    },
             ].map(({ label, value, color }) => (
               <div key={label} className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2.5 text-center">
-                <p className={cn('text-[18px] font-black leading-none', color)}>{value}</p>
+                <p className={cn("text-[18px] font-black leading-none", color)}>{value}</p>
                 <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mt-1">{label}</p>
               </div>
             ))}
           </div>
+
+          {submissions.some(s => !s.reviewed) && (
+            <button onClick={autoReview} disabled={reviewing}
+              className="mt-3 w-full h-10 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-60">
+              {reviewing
+                ? <><span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />Reviewing…</>
+                : <><TrendingUp size={14} />Auto-Review All</>
+              }
+            </button>
+          )}
         </div>
 
         {/* Student list */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-
           {loading && (
             <div className="flex items-center justify-center py-16">
               <span className="w-6 h-6 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
             </div>
           )}
 
-          {!loading && enriched.length === 0 && notStartedStudents.length === 0 && (
+          {!loading && byStudent.length === 0 && notSubmittedStudents.length === 0 && (
             <div className="flex flex-col items-center py-16 text-center">
               <AlertCircle size={32} className="text-gray-300 mb-3" />
-              <p className="text-[14px] font-bold text-gray-500">No student data yet</p>
-              <p className="text-[12px] text-gray-400 mt-1">Students haven't started this homework.</p>
+              <p className="text-[14px] font-bold text-gray-500">No submissions yet</p>
+              <p className="text-[12px] text-gray-400 mt-1">Students haven&apos;t submitted answers.</p>
             </div>
           )}
 
-          {/* Students who have attempted */}
-          {enriched.length > 0 && (
+          {byStudent.length > 0 && (
             <>
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 px-1">Attempted</p>
-              {enriched.map((s, i) => {
-                const pct        = totalPuzzles ? Math.round((s.solved / totalPuzzles) * 100) : 0
-                const completed  = s.solved >= totalPuzzles && totalPuzzles > 0
-                const accuracy   = s.solved + s.wrongTotal > 0
-                  ? Math.round((s.solved / (s.solved + s.wrongTotal)) * 100) : null
-
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 px-1">Submitted</p>
+              {byStudent.map((s, i) => {
+                const subCorrect = s.submissions.filter(x => x.correct === true).length;
+                const subWrong   = s.submissions.filter(x => x.correct === false).length;
+                const subPending = s.submissions.filter(x => !x.reviewed).length;
                 return (
                   <motion.div key={s.studentId}
                     initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
                     className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                    <div className="flex items-start gap-3">
-                      {/* Avatar */}
-                      <div className={cn('w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-black shrink-0',
-                        completed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600')}>
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-9 h-9 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center text-[13px] font-black shrink-0">
                         {s.name[0]?.toUpperCase()}
                       </div>
-
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-[13px] font-bold text-gray-900 truncate">{s.name}</p>
-                          {completed
-                            ? <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full shrink-0">
-                                <Check size={9} strokeWidth={3} /> Done
-                              </span>
-                            : <span className="text-[10px] text-gray-400 shrink-0">{fmtAgo(s.lastAt)}</span>
-                          }
-                        </div>
-
-                        {/* Progress bar */}
-                        <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full rounded-full transition-all duration-500"
-                            style={{ width: `${pct}%`, background: completed ? '#22c55e' : '#f97316' }} />
-                        </div>
-
-                        {/* Stats row */}
-                        <div className="flex items-center gap-4 mt-2">
-                          <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
-                            <Check size={10} strokeWidth={3} /> {s.solved}/{totalPuzzles} correct
-                          </span>
-                          <span className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
-                            <X size={10} strokeWidth={3} /> {s.wrongTotal} wrong
-                          </span>
-                          {accuracy !== null && (
-                            <span className="text-[11px] text-gray-400">{accuracy}% acc.</span>
-                          )}
-                          <span className="text-[11px] text-gray-400 ml-auto">{fmtTime(s.timeSecs)}</span>
-                        </div>
+                        <p className="text-[13px] font-bold text-gray-900 truncate">{s.name}</p>
+                        <p className="text-[11px] text-gray-400">{s.submissions.length}/{totalPuzzles} answered</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {subCorrect > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">{subCorrect} ✓</span>}
+                        {subWrong   > 0 && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">{subWrong} ✗</span>}
+                        {subPending > 0 && <span className="text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{subPending} pending</span>}
                       </div>
                     </div>
+                    <div className="space-y-1.5">
+                      {s.submissions.map(sub => {
+                        const pzl         = puzzleMap[sub.puzzleId];
+                        const pzlIdx      = puzzles.findIndex(p => p.id === sub.puzzleId);
+                        const studentSan  = uciToSanSingle(pzl, sub.moves[0]);
+                        const correctSan  = uciToSanSingle(pzl, pzl?.solution[0]);
+                        return (
+                          <div key={sub.puzzleId} className={cn(
+                            "flex items-center gap-2 px-3 py-2 rounded-xl text-[11px]",
+                            sub.reviewed ? (sub.correct ? "bg-emerald-50" : "bg-red-50") : "bg-gray-50"
+                          )}>
+                            <span className="font-bold text-gray-400 shrink-0 w-5">#{pzlIdx + 1}</span>
+                            <span className="font-mono text-gray-700 flex-1 truncate">{studentSan}</span>
+                            {sub.reviewed ? (
+                              sub.correct
+                                ? <span className="flex items-center gap-1 text-emerald-600 font-bold shrink-0"><Check size={10} strokeWidth={3} />Correct</span>
+                                : <div className="flex items-center gap-2 shrink-0">
+                                    <span className="flex items-center gap-1 text-red-500 font-bold"><X size={10} strokeWidth={3} />Wrong</span>
+                                    <span className="text-gray-500">→ <span className="font-mono font-bold">{correctSan}</span></span>
+                                  </div>
+                            ) : (
+                              <span className="text-blue-400 shrink-0">pending</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </motion.div>
-                )
+                );
               })}
             </>
           )}
 
-          {/* Students who haven't started */}
-          {notStartedStudents.length > 0 && (
+          {notSubmittedStudents.length > 0 && (
             <>
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 px-1 mt-2">Not Started</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 px-1 mt-2">Not Submitted</p>
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50">
-                {notStartedStudents.map(s => (
+                {notSubmittedStudents.map(s => (
                   <div key={s.id} className="flex items-center gap-3 px-4 py-3">
                     <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center text-[12px] font-bold shrink-0">
                       {s.name[0]?.toUpperCase()}
@@ -1009,7 +914,7 @@ function CoachReviewPanel({ hw, pgns, students, onClose }) {
         </div>
       </motion.div>
     </div>
-  )
+  );
 }
 
 // ── Main HomeworkPage ─────────────────────────────────────────────────────────
@@ -1072,13 +977,16 @@ export default function HomeworkPage() {
   // Refresh progress — runs on initial load and after returning from player
   useEffect(() => {
     if (user?.role !== "student" || !user?.id || homework.length === 0) return;
-    getFullHomeworkProgressForStudent(user.id).then(rows => {
+    getFullSubmissionsForStudent(user.id).then(rows => {
       setAllProgress(rows);
       const map = {};
       homework.forEach(h => {
-        const total = pgns.find(pgn => pgn.id === h.pgnId)?.puzzleCount || 0;
-        const solved = rows.filter(r => r.homework_id === h.id && r.solved).length;
-        if (total > 0) map[h.id] = { solved, total };
+        const total     = pgns.find(pgn => pgn.id === h.pgnId)?.puzzleCount || 0;
+        const hwRows    = rows.filter(r => r.homework_id === h.id);
+        const submitted = hwRows.length;
+        const correct   = hwRows.filter(r => r.reviewed && r.correct === true).length;
+        const wrong     = hwRows.filter(r => r.reviewed && r.correct === false).length;
+        if (total > 0) map[h.id] = { submitted, total, correct, wrong };
       });
       setProgressMap(map);
     });
