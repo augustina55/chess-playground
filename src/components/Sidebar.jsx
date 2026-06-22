@@ -21,7 +21,7 @@ const NAV_SECTIONS = [
   {
     label: "ACADEMIC",
     items: [
-      { id: "batches", icon: Users, label: "Batches" },
+      { id: "batches", icon: Users, label: "Batches", labels: { student: "Classroom" } },
       { id: "learn", icon: GraduationCap, label: "Learn Chess", roles: ["admin"] },
       { id: "homework", icon: BookOpen, label: "Homework" },
     ],
@@ -45,7 +45,7 @@ const NAV_SECTIONS = [
   },
 ];
 
-function NavItem({ item, active, onClick }) {
+function NavItem({ item, active, onClick, user }) {
   const Icon = item.icon;
   const isActive = active === item.id;
 
@@ -64,7 +64,7 @@ function NavItem({ item, active, onClick }) {
         size={16}
         className={cn("shrink-0", isActive ? "text-white" : "text-[#d1b89b]")}
       />
-      <span className="truncate">{item.label}</span>
+      <span className="truncate">{item.labels?.[user?.role] ?? item.label}</span>
     </button>
   );
 }
@@ -114,6 +114,7 @@ function SidebarContent({ active, user, onNav, onItemClick }) {
                       key={item.id}
                       item={item}
                       active={active}
+                      user={user}
                       onClick={() => {
                         onNav(item.id);
                         onItemClick?.();

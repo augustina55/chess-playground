@@ -6,11 +6,12 @@ import {
   Plus, Users, Trash2, X, Link2, CalendarDays,
   ChevronLeft, ChevronRight, Clock, Search,
   UserPlus, UserMinus, Check, FileText, Upload, Download,
-  ChevronDown, BookOpen, ExternalLink,
+  ChevronDown, BookOpen, ExternalLink, TrendingUp,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/utils";
 import { BOARD_THEMES } from "../lib/boardThemes";
+import { HWPlayer, STATUS_CFG } from "./HomeworkPage";
 import {
   getBatches, getBatchesByAcademy, createBatch, deleteBatch,
   getBatchStudents, addStudentToBatch, removeStudentFromBatch, getBatchStudentCounts,
@@ -20,6 +21,7 @@ import {
   getClassSessionByBatchDate, getClassSessionsByAcademy, createClassSession, updateClassSession,
   getClassSessionsByBatch, getAttendanceByBatch,
   getPgns, createPgn, getPgnsByIds,
+  getHomeworkForBatch, getFullSubmissionsForStudent,
 } from "../lib/db";
 
 // ── constants ──────────────────────────────────────────────────────────────────
@@ -1990,13 +1992,13 @@ function BatchHistoryDrawer({ batch, studentId, onClose }) {
   );
 }
 
-// ── Student: read-only enrolled batches view ──────────────────────────────────
+// ── Student: Classroom (Batches | Homework | Class Notes) ────────────────────
 
-function StudentBatchesView({ search }) {
-  const { user }          = useAuth();
-  const [batches,         setBatches]         = useState([]);
-  const [loading,         setLoading]         = useState(true);
-  const [selectedBatch,   setSelectedBatch]   = useState(null);
+function StudentBatchesTab({ search }) {
+  const { user }        = useAuth();
+  const [batches,       setBatches]     = useState([]);
+  const [loading,       setLoading]     = useState(true);
+  const [selectedBatch, setSelectedBatch] = useState(null);
 
   useEffect(() => {
     getBatchesForStudent(user?.id).then(b => { setBatches(b); setLoading(false); });
@@ -2009,41 +2011,30 @@ function StudentBatchesView({ search }) {
   );
 
   if (loading) return (
-    <div className="flex items-center justify-center py-32">
+    <div className="flex items-center justify-center py-20">
       <span className="w-8 h-8 rounded-full border-2 border-gray-200 border-t-brand-500 animate-spin" />
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-[#f6f8fc]">
-      <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
-        <div className="mb-6">
-          <h2 className="text-[20px] font-black text-gray-900">My Batches</h2>
-          <p className="text-[12px] text-gray-400 mt-0.5">Classes you&apos;re enrolled in</p>
+    <>
+      {filtered.length === 0 ? (
+        <div className="rounded-[28px] bg-white border border-gray-200 py-20 flex flex-col items-center text-center">
+          <div className="w-16 h-16 rounded-[20px] bg-brand-50 flex items-center justify-center mb-4">
+            <Users size={28} className="text-brand-400" />
+          </div>
+          <h3 className="text-[16px] font-bold text-gray-800">Not enrolled yet</h3>
+          <p className="text-[13px] text-gray-400 mt-1.5 max-w-xs">
+            Your coach will add you to a batch. Check back soon!
+          </p>
         </div>
-
-        {filtered.length === 0 ? (
-          <div className="rounded-[28px] bg-white border border-gray-200 py-20 flex flex-col items-center text-center">
-            <div className="w-16 h-16 rounded-[20px] bg-brand-50 flex items-center justify-center mb-4">
-              <Users size={28} className="text-brand-400" />
-            </div>
-            <h3 className="text-[16px] font-bold text-gray-800">Not enrolled yet</h3>
-            <p className="text-[13px] text-gray-400 mt-1.5 max-w-xs">
-              Your coach will add you to a batch. Check back soon!
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map(b => (
-              <StudentBatchCard
-                key={b.id}
-                batch={b}
-                onClick={() => setSelectedBatch(b)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map(b => (
+            <StudentBatchCard key={b.id} batch={b} onClick={() => setSelectedBatch(b)} />
+          ))}
+        </div>
+      )}
 
       {selectedBatch && (
         <BatchHistoryDrawer
@@ -2052,6 +2043,286 @@ function StudentBatchesView({ search }) {
           onClose={() => setSelectedBatch(null)}
         />
       )}
+    </>
+  );
+}
+
+function StudentHomeworkTab() {
+  const { user }         = useAuth();
+  const [homework,       setHomework]    = useState([]);
+  const [pgns,           setPgns]        = useState([]);
+  const [progressMap,    setProgressMap] = useState({});
+  const [loading,        setLoading]     = useState(true);
+  const [activeHw,       setActiveHw]    = useState(null);
+  const [progressKey,    setProgressKey] = useState(0);
+
+  useEffect(() => {
+    async function load() {
+      const [allPgns, hw] = await Promise.all([
+        getPgns(),
+        user?.batchCode ? getHomeworkForBatch(user.batchCode) : Promise.resolve([]),
+      ]);
+      setPgns(allPgns);
+      setHomework(hw);
+      setLoading(false);
+    }
+    load();
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!user?.id || homework.length === 0 || pgns.length === 0) return;
+    getFullSubmissionsForStudent(user.id).then(rows => {
+      const map = {};
+      homework.forEach(h => {
+        const total     = pgns.find(p => p.id === h.pgnId)?.puzzleCount || 0;
+        const hwRows    = rows.filter(r => r.homework_id === h.id);
+        const submitted = hwRows.length;
+        if (total > 0) map[h.id] = { submitted, total };
+      });
+      setProgressMap(map);
+    });
+  }, [homework, pgns, progressKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function getStatus(hw) {
+    const p = progressMap[hw.id];
+    const total     = p?.total     || 0;
+    const submitted = p?.submitted || 0;
+    const overdue   = hw.dueDate && new Date(hw.dueDate) < new Date();
+    if (total > 0 && submitted >= total) return 'completed';
+    if (submitted > 0) return overdue ? 'overdue' : 'in-progress';
+    if (overdue && total > 0) return 'overdue';
+    return 'not-started';
+  }
+
+  if (activeHw) {
+    return <HWPlayer hw={activeHw} onBack={() => { setActiveHw(null); setProgressKey(k => k + 1); }} />;
+  }
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-20">
+      <span className="w-8 h-8 rounded-full border-2 border-gray-200 border-t-brand-500 animate-spin" />
+    </div>
+  );
+
+  if (homework.length === 0) return (
+    <div className="rounded-[28px] bg-white border border-gray-200 py-20 flex flex-col items-center text-center">
+      <div className="w-16 h-16 rounded-[20px] bg-brand-50 flex items-center justify-center mb-4">
+        <TrendingUp size={28} className="text-brand-400" />
+      </div>
+      <h3 className="text-[16px] font-bold text-gray-800">No homework yet</h3>
+      <p className="text-[13px] text-gray-400 mt-1.5 max-w-xs">Your coach hasn&apos;t assigned any homework yet.</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      {homework.map(hw => {
+        const p         = progressMap[hw.id];
+        const submitted = p?.submitted || 0;
+        const total     = p?.total     || 0;
+        const pct       = total > 0 ? Math.round((submitted / total) * 100) : 0;
+        const status    = getStatus(hw);
+        const st        = STATUS_CFG[status];
+        const overdue   = hw.dueDate && new Date(hw.dueDate) < new Date() && status !== 'completed';
+
+        return (
+          <div key={hw.id} onClick={() => setActiveHw(hw)}
+            className={cn(
+              "bg-white rounded-2xl p-5 cursor-pointer hover:shadow-md transition-all border",
+              status === 'in-progress' ? "border-orange-200" : "border-gray-100"
+            )}>
+            <div className="flex items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-bold text-orange-500 mb-0.5">{hw.batchName || '—'}</p>
+                <h3 className="text-[15px] font-black text-gray-900 leading-tight mb-2">{hw.title}</h3>
+                {total > 0 ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[11px] text-gray-400">{submitted}/{total} answered</p>
+                      <p className="text-[12px] font-bold text-gray-700">{pct}%</p>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${pct}%`, background: status === 'completed' ? '#22c55e' : '#f97316' }} />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[12px] text-gray-400">No puzzles</p>
+                )}
+              </div>
+              <div className="flex flex-col items-end gap-2 shrink-0">
+                {hw.dueDate && (
+                  <span className={cn("text-[11px] font-medium", overdue ? "text-red-500" : "text-gray-400")}>
+                    Due {hw.dueDate}
+                  </span>
+                )}
+                <span className={cn("px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap", st.cls)}>
+                  {st.label}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StudentClassNotesTab() {
+  const { user }       = useAuth();
+  const [sessions,     setSessions]  = useState([]);
+  const [loading,      setLoading]   = useState(true);
+  const [pdfTarget,    setPdfTarget] = useState(null);
+  const [pgnTarget,    setPgnTarget] = useState(null);
+
+  useEffect(() => {
+    async function load() {
+      const batches = await getBatchesForStudent(user?.id);
+      const results = await Promise.all(
+        batches.map(b => Promise.all([getClassSessionsByBatch(b.id), getAttendanceByBatch(b.id)]))
+      );
+      const all = [];
+      results.forEach(([sess, att], i) => {
+        const batchName = batches[i].name;
+        const attByDate = {};
+        att.filter(a => String(a.studentId) === String(user?.id))
+           .forEach(a => { attByDate[a.date] = a; });
+        sess.forEach(s => all.push({ ...s, batchName, attRecord: attByDate[s.date] || null }));
+      });
+      all.sort((a, b) => b.date.localeCompare(a.date));
+      setSessions(all);
+      setLoading(false);
+    }
+    load();
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function openNotes(session) {
+    if (session.pgnIds?.length > 0) {
+      const pgns = await getPgnsByIds(session.pgnIds);
+      if (pgns.length > 0) { setPgnTarget({ pgn: pgns[0], title: session.title }); return; }
+    }
+    if (session.pdfAttachments?.length > 0)
+      setPdfTarget({ pdfs: session.pdfAttachments, idx: 0, title: session.title });
+  }
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-20">
+      <span className="w-8 h-8 rounded-full border-2 border-gray-200 border-t-brand-500 animate-spin" />
+    </div>
+  );
+
+  if (sessions.length === 0) return (
+    <div className="rounded-[28px] bg-white border border-gray-200 py-20 flex flex-col items-center text-center">
+      <div className="w-16 h-16 rounded-[20px] bg-brand-50 flex items-center justify-center mb-4">
+        <CalendarDays size={28} className="text-brand-400" />
+      </div>
+      <h3 className="text-[16px] font-bold text-gray-800">No sessions yet</h3>
+      <p className="text-[13px] text-gray-400 mt-1.5 max-w-xs">Sessions will appear here once your coach records them.</p>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-gray-100 bg-gray-50/80">
+              <th className="text-left px-5 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Date</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Topic</th>
+              <th className="text-center px-4 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Session</th>
+              <th className="text-center px-4 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Notes</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {sessions.map(s => {
+              const held    = s.presentCount > 0 || s.totalCount > 0 || !!s.title;
+              const hasNotes = s.pgnIds?.length > 0 || s.pdfAttachments?.length > 0 || s.notes;
+              const att     = s.attRecord;
+              return (
+                <tr key={s.id} className="hover:bg-gray-50/60 transition-colors">
+                  <td className="px-5 py-3.5 whitespace-nowrap">
+                    <p className="text-gray-700 font-medium">
+                      {new Date(s.date + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                    </p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">{s.batchName}</p>
+                  </td>
+                  <td className="px-4 py-3.5 text-gray-800 font-semibold max-w-[200px] truncate">
+                    {s.title || <span className="text-gray-300 font-normal">—</span>}
+                  </td>
+                  <td className="px-4 py-3.5 text-center">
+                    <span className={cn(
+                      "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold",
+                      held ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-400"
+                    )}>
+                      <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", held ? "bg-emerald-500" : "bg-gray-400")} />
+                      {att === null ? (held ? "Held" : "—") : att?.present ? "Present" : "Absent"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3.5 text-center">
+                    {hasNotes ? (
+                      <div className="flex items-center justify-center gap-1.5">
+                        {s.pgnIds?.length > 0 && (
+                          <button onClick={() => openNotes(s)}
+                            className="flex items-center gap-1 h-7 px-2.5 rounded-lg bg-brand-50 text-brand-600 hover:bg-brand-100 text-[11px] font-bold transition-colors">
+                            <BookOpen size={11} />PGN
+                          </button>
+                        )}
+                        {s.pdfAttachments?.length > 0 && (
+                          <button onClick={() => setPdfTarget({ pdfs: s.pdfAttachments, idx: 0, title: s.title })}
+                            className="flex items-center gap-1 h-7 px-2.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 text-[11px] font-bold transition-colors">
+                            <FileText size={11} />PDF
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-300 text-[11px]">—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {pdfTarget && <PdfViewer pdfs={pdfTarget.pdfs} initialIndex={pdfTarget.idx} title={pdfTarget.title} onClose={() => setPdfTarget(null)} />}
+      {pgnTarget && <PgnViewer pgn={pgnTarget.pgn} title={pgnTarget.title} onClose={() => setPgnTarget(null)} />}
+    </>
+  );
+}
+
+function StudentClassroomView({ search }) {
+  const [tab, setTab] = useState("batches");
+
+  const TABS = [
+    { id: "batches",  label: "Batches"     },
+    { id: "homework", label: "Homework"    },
+    { id: "notes",    label: "Class Notes" },
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#f6f8fc]">
+      <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
+        <div className="flex items-center border-b-2 border-gray-200 mb-7 gap-0">
+          {TABS.map(({ id, label }) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={cn(
+                "relative px-5 py-3 text-[14px] font-bold transition-colors",
+                tab === id ? "text-brand-600" : "text-gray-400 hover:text-gray-600"
+              )}>
+              {label}
+              {tab === id && (
+                <motion.span layoutId="classroom-tab-line"
+                  className="absolute bottom-[-2px] left-0 right-0 h-0.5 bg-brand-600 rounded-full" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {tab === "batches"  && <StudentBatchesTab search={search} />}
+        {tab === "homework" && <StudentHomeworkTab />}
+        {tab === "notes"    && <StudentClassNotesTab />}
+      </div>
     </div>
   );
 }
@@ -2282,6 +2553,6 @@ function CoachAdminBatchesView({ search }) {
 
 export default function BatchesPage({ search }) {
   const { user } = useAuth();
-  if (user?.role === "student") return <StudentBatchesView search={search} />;
+  if (user?.role === "student") return <StudentClassroomView search={search} />;
   return <CoachAdminBatchesView search={search} />;
 }

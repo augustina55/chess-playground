@@ -6,7 +6,7 @@ import { cn } from "../lib/utils";
 
 const PAGE_TITLES = {
   home:        "Dashboard",
-  batches:     "Batches",
+  batches:     "Batches",  // overridden to "Classroom" for students below
   "blitz-race":"Blitz Race",
   homework:    "Homework",
   "pgn-center":"PGN Center",
@@ -275,7 +275,9 @@ export default function Header({ onProfile, currentPage }) {
               </p>
             )}
             <h1 className="truncate text-[20px] font-black tracking-tight text-[#1a140f] leading-tight">
-              {PAGE_TITLES[currentPage] || "Dashboard"}
+              {currentPage === "batches" && user?.role === "student"
+                ? "Classroom"
+                : PAGE_TITLES[currentPage] || "Dashboard"}
             </h1>
           </div>
         </div>

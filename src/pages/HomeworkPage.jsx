@@ -51,7 +51,7 @@ function getCircleItems(total, current) {
 
 // ── HW Player ─────────────────────────────────────────────────────────────────
 
-function HWPlayer({ hw, onBack }) {
+export function HWPlayer({ hw, onBack }) {
   const { user }   = useAuth();
   const boardTheme = BOARD_THEMES.find(t => t.id === (user?.settings?.boardTheme ?? "brown")) || BOARD_THEMES[0];
 
@@ -413,7 +413,7 @@ function WeeklyChart({ days, counts }) {
 
 // ── Student Homework View (redesigned) ────────────────────────────────────────
 
-const STATUS_CFG = {
+export const STATUS_CFG = {
   'completed':   { label: 'Completed',   cls: 'bg-emerald-50 text-emerald-600 border border-emerald-100' },
   'in-progress': { label: 'In Progress', cls: 'bg-orange-50  text-orange-500  border border-orange-100'  },
   'not-started': { label: 'Not Started', cls: 'bg-purple-50  text-purple-500  border border-purple-100'  },
