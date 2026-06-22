@@ -202,7 +202,7 @@ function AcademyTab() {
   useEffect(() => {
     getAcademies().then(all => {
       let ac = null;
-      if (user?.role === "coach")
+      if (user?.role === "coach" || user?.role === "academy")
         ac = all.find(a => String(a.mainCoachId) === String(user.id));
       else if (user?.role === "student")
         ac = all.find(a => String(a.id) === String(user.academyId));
@@ -573,7 +573,8 @@ function CoachesTab() {
     async function load() {
       const all = await getAcademies();
       let ac = null;
-      if (user?.role === "coach")      ac = all.find(a => String(a.mainCoachId) === String(user.id));
+      if (user?.role === "coach" || user?.role === "academy")
+        ac = all.find(a => String(a.mainCoachId) === String(user.id));
       else if (user?.role === "admin") ac = all[0];
       if (!ac) { setLoading(false); return; }
       setAcademy(ac);
@@ -1034,7 +1035,7 @@ function StudentsTab() {
   useEffect(() => {
     getAcademies().then(all => {
       let ac = null;
-      if (user?.role === "coach")
+      if (user?.role === "coach" || user?.role === "academy")
         ac = all.find(a => String(a.mainCoachId) === String(user?.id));
       else if (user?.role === "admin")
         ac = all[0] || null;

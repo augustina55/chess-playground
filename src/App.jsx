@@ -30,7 +30,8 @@ function MainApp() {
     if (!user || user.role === "admin") return;
     getAcademies().then(all => {
       let ac = null;
-      if (user.role === "coach")   ac = all.find(a => String(a.mainCoachId) === String(user.id));
+      if (user.role === "coach" || user.role === "academy")
+        ac = all.find(a => String(a.mainCoachId) === String(user.id));
       if (user.role === "student") ac = all.find(a => String(a.id) === String(user.academyId));
       if (!ac) return;
       if (ac.name) localStorage.setItem("ca_academy_name", ac.name);
@@ -82,7 +83,7 @@ function MainApp() {
               {page === "analyse"     && <AnalysePage />}
               {page === "learn"       && <LearnPage />}
               {page === "class-notes" && <ClassNotesPage />}
-{page === "academy"    && (user?.role === "admin" || user?.role === "coach") && <AcademyPage />}
+{page === "academy"    && (user?.role === "admin" || user?.role === "academy") && <AcademyPage />}
               {page === "admin"      && user?.role === "admin" && <AdminPage />}
             </div>
           </main>

@@ -40,9 +40,10 @@ export function AuthProvider({ children }) {
   // Role-switching helpers (dev/demo only — swaps the local session without touching DB)
   function switchToRole(role) {
     const DEMO = {
-      admin:   { id: 1, username: "admin",   name: "Admin User",  role: "admin",   avatar: "A" },
-      coach:   { id: 2, username: "coach",   name: "Coach Ravi",  role: "coach",   avatar: "R" },
-      student: { id: 3, username: "student", name: "Arjun Kumar", role: "student", avatar: "K" },
+      admin:   { id: 1, username: "admin",   name: "Admin User",    role: "admin",   avatar: "A" },
+      coach:   { id: 2, username: "coach",   name: "Coach Ravi",    role: "coach",   avatar: "R" },
+      student: { id: 3, username: "student", name: "Arjun Kumar",   role: "student", avatar: "K" },
+      academy: { id: 4, username: "academy", name: "Circle Academy", role: "academy", avatar: "C" },
     };
     const target = DEMO[role];
     if (!target) return;

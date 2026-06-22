@@ -19,6 +19,7 @@ const ROLE_COLORS = {
   admin:   "bg-red-500",
   coach:   "bg-indigo-500",
   student: "bg-emerald-500",
+  academy: "bg-orange-500",
 };
 
 function AcademySwitcher({ academies, activeId, onSwitch, switching }) {
@@ -190,11 +191,16 @@ export default function Header({ onProfile, currentPage }) {
     return () => window.removeEventListener("ca-logo-update", sync);
   }, []);
 
-  // Load pending invitations + all academies (coaches only)
+  // Load pending invitations + all academies (coaches and academy owners)
   useEffect(() => {
-    if (user?.role !== "coach" || !user?.id) return;
-    getCoachInvitations(user.id).then(setInvitations).catch(() => {});
-    Promise.all([getAcademies(), getCoachAcademies(user.id)]).then(([all, invs]) => {
+    if (!user?.id || !["coach", "academy"].includes(user?.role)) return;
+    if (user.role === "coach") {
+      getCoachInvitations(user.id).then(setInvitations).catch(() => {});
+    }
+    const academiesPromise = user.role === "coach"
+      ? Promise.all([getAcademies(), getCoachAcademies(user.id)])
+      : getAcademies().then(all => [all, []]);
+    academiesPromise.then(([all, invs]) => {
       const list = [];
       const own = all.find(a => String(a.mainCoachId) === String(user.id));
       if (own) list.push({ id: own.id, name: own.name, logo: own.logo, isOwn: true });
@@ -263,7 +269,7 @@ export default function Header({ onProfile, currentPage }) {
             }
           </div>
           <div className="min-w-0">
-            {(user?.role === "coach" || user?.role === "student") && academyName && (
+            {(user?.role === "coach" || user?.role === "academy" || user?.role === "student") && academyName && (
               <p className="truncate text-[12px] font-black uppercase tracking-[0.12em] text-[#8b5a3c]">
                 {academyName}
               </p>
@@ -276,8 +282,8 @@ export default function Header({ onProfile, currentPage }) {
 
         {/* Right: academy switcher + notification + profile */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Academy switcher — only when coach has multiple academies */}
-          {user?.role === "coach" && allAcademies.length > 1 && (
+          {/* Academy switcher — only when coach/academy has multiple academies */}
+          {["coach", "academy"].includes(user?.role) && allAcademies.length > 1 && (
             <AcademySwitcher
               academies={allAcademies}
               activeId={activeAcademyId}

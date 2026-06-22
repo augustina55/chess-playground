@@ -27,7 +27,7 @@ const NAV_SECTIONS = [
       { id: "learn", icon: GraduationCap, label: "Learn Chess", roles: ["admin"] },
       { id: "homework", icon: BookOpen, label: "Homework" },
       { id: "class-notes", icon: NotebookPen, label: "Class Notes" },
-      { id: "pgn-center", icon: FileText, label: "PGN Center", roles: ["admin", "coach"] },
+      { id: "pgn-center", icon: FileText, label: "PGN Center", roles: ["admin", "coach", "academy"] },
     ],
   },
   {
@@ -43,7 +43,7 @@ const NAV_SECTIONS = [
   {
     label: "MANAGEMENT",
     items: [
-      { id: "academy", icon: Building2, label: "Academy", roles: ["admin", "coach"] },
+      { id: "academy", icon: Building2, label: "Academy", roles: ["admin", "academy"] },
       { id: "admin", icon: Settings, label: "Admin", roles: ["admin"] },
     ],
   },

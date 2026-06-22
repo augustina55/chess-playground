@@ -12,7 +12,7 @@ create table if not exists profiles (
   password     text         not null,
   name         text         not null,
   role         text         not null default 'student'
-                            check (role in ('admin','coach','student')),
+                            check (role in ('admin','coach','student','academy')),
   avatar       text,
   phone        text,
   email        text,
@@ -224,7 +224,8 @@ alter table race_scores       disable row level security;
 insert into profiles (username, password, name, role, avatar) values
   ('admin',   'admin123',   'Admin User',  'admin',   'A'),
   ('coach',   'coach123',   'Coach Ravi',  'coach',   'R'),
-  ('student', 'student123', 'Arjun Kumar', 'student', 'K')
+  ('student', 'student123', 'Arjun Kumar', 'student', 'K'),
+  ('academy', 'academy123', 'Circle Academy', 'academy', 'C')
 on conflict (username) do nothing;
 
 -- ── Class Sessions ────────────────────────────────────────────────────────────
