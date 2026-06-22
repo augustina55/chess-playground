@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/utils";
+import { BOARD_THEMES } from "../lib/boardThemes";
 import {
   getBatches, getBatchesByAcademy, createBatch, deleteBatch,
   getBatchStudents, addStudentToBatch, removeStudentFromBatch, getBatchStudentCounts,
@@ -1304,7 +1305,7 @@ function parsePgnGame(rawPgn) {
 
 // ── PdfViewer ─────────────────────────────────────────────────────────────────
 
-function PdfViewer({ pdfs, initialIndex = 0, onClose }) {
+function PdfViewer({ pdfs, initialIndex = 0, title, onClose }) {
   const [idx, setIdx] = useState(initialIndex);
   const pdf = pdfs[idx];
 
@@ -1316,45 +1317,45 @@ function PdfViewer({ pdfs, initialIndex = 0, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[300] flex flex-col bg-black/90">
-      {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-5 py-3 bg-[#1a140f] border-b border-white/10">
         <div className="flex items-center gap-3">
-          <FileText size={16} className="text-orange-400" />
-          <span className="text-[14px] font-bold text-white truncate max-w-[300px]">{pdf?.name || "PDF"}</span>
-          {pdfs.length > 1 && (
-            <span className="text-[12px] text-white/40">{idx + 1} / {pdfs.length}</span>
-          )}
+          <FileText size={16} className="text-[#f97316]" />
+          <div>
+            <span className="text-[14px] font-bold text-white truncate block max-w-[400px]">
+              {title || pdf?.name || "PDF"}
+            </span>
+            {pdfs.length > 1 && (
+              <span className="text-[11px] text-white/40">File {idx + 1} of {pdfs.length}</span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {pdfs.length > 1 && (
             <>
               <button onClick={() => setIdx(i => Math.max(0, i - 1))}
                 disabled={idx === 0}
-                className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center disabled:opacity-30 hover:bg-white/20 transition-colors">
-                <ChevronLeft size={14} />
+                className="w-9 h-9 rounded-xl border border-white/20 text-white flex items-center justify-center disabled:opacity-30 hover:bg-white/10 transition-colors">
+                <ChevronLeft size={15} />
               </button>
               <button onClick={() => setIdx(i => Math.min(pdfs.length - 1, i + 1))}
                 disabled={idx === pdfs.length - 1}
-                className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center disabled:opacity-30 hover:bg-white/20 transition-colors">
-                <ChevronRight size={14} />
+                className="w-9 h-9 rounded-xl border border-white/20 text-white flex items-center justify-center disabled:opacity-30 hover:bg-white/10 transition-colors">
+                <ChevronRight size={15} />
               </button>
             </>
           )}
           <button onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center hover:bg-red-500/60 transition-colors">
-            <X size={14} />
+            className="w-9 h-9 rounded-xl bg-[#f97316] text-white flex items-center justify-center hover:bg-[#ea6c00] transition-colors">
+            <X size={15} />
           </button>
         </div>
       </div>
 
-      {/* PDF content */}
       <div className="flex-1 min-h-0">
         {pdf?.data ? (
           <embed src={pdf.data} type="application/pdf" className="w-full h-full" />
         ) : (
-          <div className="flex items-center justify-center h-full text-white/40 text-[14px]">
-            No PDF data available
-          </div>
+          <div className="flex items-center justify-center h-full text-white/40 text-[14px]">No PDF data</div>
         )}
       </div>
     </div>
@@ -1363,11 +1364,13 @@ function PdfViewer({ pdfs, initialIndex = 0, onClose }) {
 
 // ── PgnViewer ─────────────────────────────────────────────────────────────────
 
-function PgnViewer({ pgn, onClose }) {
-  const [chapters,       setChapters]       = useState([]);
-  const [chapterIdx,     setChapterIdx]     = useState(0);
-  const [moveIdx,        setMoveIdx]        = useState(-1);
-  const commentsRef                          = useRef(null);
+function PgnViewer({ pgn, title, onClose }) {
+  const { user }         = useAuth();
+  const boardTheme       = BOARD_THEMES.find(t => t.id === (user?.settings?.boardTheme ?? "brown")) || BOARD_THEMES[0];
+  const [chapters,       setChapters]   = useState([]);
+  const [chapterIdx,     setChapterIdx] = useState(0);
+  const [moveIdx,        setMoveIdx]    = useState(-1);
+  const moveListRef                      = useRef(null);
 
   useEffect(() => {
     function onKey(e) { if (e.key === "Escape") onClose(); }
@@ -1376,30 +1379,26 @@ function PgnViewer({ pgn, onClose }) {
   }, [onClose]);
 
   useEffect(() => {
-    const games = splitPgnGames(pgn?.content || "");
+    const games  = splitPgnGames(pgn?.content || "");
     const parsed = games.map(parsePgnGame).filter(Boolean);
-    setChapters(parsed.length ? parsed : [{ title: pgn?.name || "Game", moves: [], startFen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" }]);
+    setChapters(parsed.length
+      ? parsed
+      : [{ title: pgn?.name || "Game", moves: [], startFen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" }]
+    );
     setChapterIdx(0);
     setMoveIdx(-1);
   }, [pgn]);
 
-  const chapter = chapters[chapterIdx];
-  const currentFen = moveIdx < 0
-    ? chapter?.startFen
-    : chapter?.moves[moveIdx]?.fen;
+  const chapter       = chapters[chapterIdx];
+  const totalMoves    = chapter?.moves.length ?? 0;
+  const currentFen    = moveIdx < 0 ? chapter?.startFen : chapter?.moves[moveIdx]?.fen;
   const currentComment = moveIdx >= 0 ? chapter?.moves[moveIdx]?.comment : null;
 
-  // Scroll comments into view when they appear
-  useEffect(() => {
-    if (currentComment && commentsRef.current) {
-      commentsRef.current.scrollTop = commentsRef.current.scrollHeight;
-    }
-  }, [currentComment, moveIdx]);
-
-  function goTo(idx) {
-    setMoveIdx(Math.max(-1, Math.min((chapter?.moves.length ?? 0) - 1, idx)));
+  function goTo(i) {
+    setMoveIdx(Math.max(-1, Math.min(totalMoves - 1, i)));
   }
 
+  // Keyboard navigation
   useEffect(() => {
     function onKeyNav(e) {
       if (e.key === "ArrowLeft")  goTo(moveIdx - 1);
@@ -1407,106 +1406,120 @@ function PgnViewer({ pgn, onClose }) {
     }
     window.addEventListener("keydown", onKeyNav);
     return () => window.removeEventListener("keydown", onKeyNav);
-  }, [moveIdx, chapter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [moveIdx, totalMoves]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Build move number display
+  // Auto-scroll active move into view in move list
+  useEffect(() => {
+    if (!moveListRef.current) return;
+    const active = moveListRef.current.querySelector("[data-active='true']");
+    active?.scrollIntoView({ block: "nearest" });
+  }, [moveIdx]);
+
   function movePairs(moves) {
     const pairs = [];
-    for (let i = 0; i < moves.length; i += 2) {
-      pairs.push({ num: Math.floor(i / 2) + 1, white: moves[i], black: moves[i + 1] });
-    }
+    for (let i = 0; i < moves.length; i += 2)
+      pairs.push({ num: Math.floor(i / 2) + 1, w: moves[i], b: moves[i + 1] });
     return pairs;
   }
 
+  const navBtnCls = "w-9 h-9 rounded-xl border border-gray-200 bg-white text-gray-600 flex items-center justify-center hover:border-[#f97316] hover:text-[#f97316] transition-colors disabled:opacity-30 disabled:pointer-events-none shadow-sm";
+
   return (
-    <div className="fixed inset-0 z-[300] flex flex-col bg-[#1a1a2e]">
-      {/* Header */}
-      <div className="shrink-0 flex items-center justify-between px-5 py-3 bg-[#1a140f] border-b border-white/10">
+    <div className="fixed inset-0 z-[300] flex flex-col bg-[#f6f8fc]">
+
+      {/* Header — same dark bar as the app header */}
+      <div className="shrink-0 flex items-center justify-between px-5 py-3.5 bg-[#1a140f] border-b-2 border-[#1a140f]">
         <div className="flex items-center gap-3">
-          <BookOpen size={16} className="text-orange-400" />
-          <span className="text-[14px] font-bold text-white">{pgn?.name || "PGN Viewer"}</span>
+          <div className="w-8 h-8 rounded-full bg-[#f97316] flex items-center justify-center shrink-0">
+            <BookOpen size={14} className="text-white" />
+          </div>
+          <div>
+            <p className="text-[15px] font-black text-white leading-tight">{title || pgn?.name || "PGN Viewer"}</p>
+            {chapter && <p className="text-[11px] text-white/40">{chapter.title}</p>}
+          </div>
         </div>
         <button onClick={onClose}
-          className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center hover:bg-red-500/60 transition-colors">
-          <X size={14} />
+          className="h-9 px-4 rounded-xl bg-[#f97316] hover:bg-[#ea6c00] text-white text-[13px] font-bold flex items-center gap-1.5 transition-colors">
+          <X size={13} />Close
         </button>
       </div>
 
       {/* Body */}
       <div className="flex-1 min-h-0 flex overflow-hidden">
 
-        {/* Left: board + controls + moves */}
-        <div className="flex flex-col min-h-0 flex-1 p-4 gap-3 overflow-auto">
+        {/* ── Left: board + nav + move list ── */}
+        <div className="flex flex-col min-h-0 flex-1 p-5 gap-4 overflow-y-auto">
+
           {/* Board */}
           <div className="flex justify-center">
-            <div className="w-full max-w-[420px]">
-              {currentFen && (
-                <Chessboard
-                  position={currentFen}
-                  arePiecesDraggable={false}
-                  boardWidth={undefined}
-                  customBoardStyle={{ borderRadius: "12px", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}
-                />
-              )}
+            <div className="w-full max-w-[460px]">
+              <div className="rounded-2xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
+                {currentFen && (
+                  <Chessboard options={{
+                    position:       currentFen,
+                    allowDragging:  false,
+                    darkSquareStyle:  { backgroundColor: boardTheme.dark },
+                    lightSquareStyle: { backgroundColor: boardTheme.light },
+                    boardStyle:       { borderRadius: 0 },
+                  }} />
+                )}
+              </div>
             </div>
           </div>
 
           {/* Navigation controls */}
           <div className="flex items-center justify-center gap-2">
-            <button onClick={() => goTo(-1)}
-              className="w-9 h-9 rounded-xl bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors disabled:opacity-30"
-              disabled={moveIdx < 0}>
-              <ChevronLeft size={14} className="mr-0.5" /><ChevronLeft size={14} className="-ml-2.5" />
+            <button onClick={() => goTo(-1)} disabled={moveIdx < 0} className={navBtnCls} title="Start">
+              <ChevronLeft size={13} /><ChevronLeft size={13} className="-ml-2" />
             </button>
-            <button onClick={() => goTo(moveIdx - 1)}
-              className="w-9 h-9 rounded-xl bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors disabled:opacity-30"
-              disabled={moveIdx < 0}>
+            <button onClick={() => goTo(moveIdx - 1)} disabled={moveIdx < 0} className={navBtnCls} title="Previous">
               <ChevronLeft size={16} />
             </button>
-            <span className="text-[12px] text-white/40 w-20 text-center">
-              {moveIdx < 0 ? "Start" : `Move ${moveIdx + 1}`}
-            </span>
-            <button onClick={() => goTo(moveIdx + 1)}
-              className="w-9 h-9 rounded-xl bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors disabled:opacity-30"
-              disabled={!chapter || moveIdx >= chapter.moves.length - 1}>
+            <div className="w-24 h-9 rounded-xl bg-white border border-gray-200 shadow-sm flex items-center justify-center">
+              <span className="text-[12px] font-bold text-gray-500">
+                {moveIdx < 0 ? "Start" : `${moveIdx + 1} / ${totalMoves}`}
+              </span>
+            </div>
+            <button onClick={() => goTo(moveIdx + 1)} disabled={moveIdx >= totalMoves - 1} className={navBtnCls} title="Next">
               <ChevronRight size={16} />
             </button>
-            <button onClick={() => goTo((chapter?.moves.length ?? 0) - 1)}
-              className="w-9 h-9 rounded-xl bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors disabled:opacity-30"
-              disabled={!chapter || moveIdx >= chapter.moves.length - 1}>
-              <ChevronRight size={14} className="mr-0.5" /><ChevronRight size={14} className="-ml-2.5" />
+            <button onClick={() => goTo(totalMoves - 1)} disabled={moveIdx >= totalMoves - 1} className={navBtnCls} title="End">
+              <ChevronRight size={13} /><ChevronRight size={13} className="-ml-2" />
             </button>
           </div>
 
           {/* Move list */}
-          {chapter && chapter.moves.length > 0 && (
-            <div className="rounded-xl bg-black/20 p-3 overflow-y-auto max-h-[160px]">
-              <div className="flex flex-wrap gap-x-1 gap-y-0.5">
-                {movePairs(chapter.moves).map(({ num, white, black }) => (
-                  <span key={num} className="flex items-center gap-0.5">
-                    <span className="text-[11px] text-white/30 select-none">{num}.</span>
+          {chapter && totalMoves > 0 && (
+            <div className="bg-white rounded-[20px] border border-gray-200 shadow-sm p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.15em] text-gray-400 mb-3">Moves</p>
+              <div ref={moveListRef} className="flex flex-wrap gap-x-0.5 gap-y-0.5 max-h-[180px] overflow-y-auto">
+                {movePairs(chapter.moves).map(({ num, w, b }) => (
+                  <span key={num} className="flex items-center">
+                    <span className="text-[11px] text-gray-300 px-1 select-none font-mono">{num}.</span>
                     <button
+                      data-active={moveIdx === (num - 1) * 2}
                       onClick={() => goTo((num - 1) * 2)}
                       className={cn(
-                        "px-1.5 py-0.5 rounded text-[12px] font-mono transition-colors",
+                        "px-2 py-1 rounded-lg text-[13px] font-mono font-semibold transition-colors",
                         moveIdx === (num - 1) * 2
-                          ? "bg-orange-500 text-white"
-                          : "text-white/70 hover:bg-white/10"
+                          ? "bg-[#f97316] text-white shadow-sm"
+                          : "text-gray-700 hover:bg-orange-50 hover:text-[#f97316]"
                       )}>
-                      {white.san}
-                      {white.comment && <span className="ml-0.5 text-[8px] text-orange-300">●</span>}
+                      {w.san}
+                      {w.comment && <span className="ml-0.5 inline-block w-1.5 h-1.5 rounded-full bg-[#f97316] align-middle" />}
                     </button>
-                    {black && (
+                    {b && (
                       <button
+                        data-active={moveIdx === (num - 1) * 2 + 1}
                         onClick={() => goTo((num - 1) * 2 + 1)}
                         className={cn(
-                          "px-1.5 py-0.5 rounded text-[12px] font-mono transition-colors",
+                          "px-2 py-1 rounded-lg text-[13px] font-mono font-semibold transition-colors",
                           moveIdx === (num - 1) * 2 + 1
-                            ? "bg-orange-500 text-white"
-                            : "text-white/70 hover:bg-white/10"
+                            ? "bg-[#f97316] text-white shadow-sm"
+                            : "text-gray-700 hover:bg-orange-50 hover:text-[#f97316]"
                         )}>
-                        {black.san}
-                        {black.comment && <span className="ml-0.5 text-[8px] text-orange-300">●</span>}
+                        {b.san}
+                        {b.comment && <span className="ml-0.5 inline-block w-1.5 h-1.5 rounded-full bg-[#f97316] align-middle" />}
                       </button>
                     )}
                   </span>
@@ -1516,57 +1529,75 @@ function PgnViewer({ pgn, onClose }) {
           )}
         </div>
 
-        {/* Right: chapters + comments */}
-        <div className="w-[260px] shrink-0 border-l border-white/10 flex flex-col min-h-0">
+        {/* ── Right: chapters + comment ── */}
+        <div className="w-[280px] shrink-0 border-l-2 border-gray-200 flex flex-col min-h-0 bg-white">
 
           {/* Chapters */}
-          <div className="shrink-0 border-b border-white/10">
-            <div className="px-4 py-3 flex items-center gap-2">
-              <BookOpen size={13} className="text-orange-400" />
-              <span className="text-[12px] font-bold text-white/70 uppercase tracking-wider">Chapters</span>
+          <div className="shrink-0 border-b border-gray-100">
+            <div className="px-4 py-3 flex items-center gap-2 bg-gray-50/80 border-b border-gray-100">
+              <BookOpen size={13} className="text-[#f97316]" />
+              <span className="text-[11px] font-black uppercase tracking-[0.15em] text-gray-500">Chapters</span>
+              <span className="ml-auto text-[11px] text-gray-400">{chapters.length}</span>
             </div>
-            <div className="overflow-y-auto max-h-[200px]">
+            <div className="overflow-y-auto max-h-[220px]">
               {chapters.map((ch, i) => (
                 <button key={i}
                   onClick={() => { setChapterIdx(i); setMoveIdx(-1); }}
                   className={cn(
-                    "w-full text-left px-4 py-2.5 text-[13px] transition-colors border-b border-white/5 last:border-0",
+                    "w-full text-left px-4 py-3 text-[13px] transition-colors border-b border-gray-50 last:border-0 flex items-center gap-2",
                     i === chapterIdx
-                      ? "bg-orange-500/20 text-orange-300 font-bold"
-                      : "text-white/60 hover:bg-white/5 hover:text-white/80"
+                      ? "bg-orange-50 text-[#f97316] font-bold"
+                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                   )}>
-                  <span className="text-[10px] text-white/30 mr-1">{i + 1}.</span>
-                  {ch.title}
+                  <span className={cn(
+                    "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0",
+                    i === chapterIdx ? "bg-[#f97316] text-white" : "bg-gray-100 text-gray-400"
+                  )}>{i + 1}</span>
+                  <span className="truncate">{ch.title}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Comments */}
+          {/* Comment — only current move's comment */}
           <div className="flex-1 min-h-0 flex flex-col">
-            <div className="px-4 py-3 flex items-center gap-2 border-b border-white/10 shrink-0">
-              <MessageSquare size={13} className="text-orange-400" />
-              <span className="text-[12px] font-bold text-white/70 uppercase tracking-wider">Comments</span>
+            <div className="px-4 py-3 flex items-center gap-2 bg-gray-50/80 border-b border-gray-100 shrink-0">
+              <MessageSquare size={13} className="text-[#f97316]" />
+              <span className="text-[11px] font-black uppercase tracking-[0.15em] text-gray-500">Comment</span>
             </div>
-            <div ref={commentsRef} className="flex-1 overflow-y-auto p-3 space-y-2">
-              {chapter?.moves.map((m, i) => m.comment ? (
-                <div key={i}
-                  className={cn(
-                    "rounded-2xl px-3 py-2 text-[12px] leading-relaxed cursor-pointer transition-all",
-                    i === moveIdx
-                      ? "bg-orange-500/30 border border-orange-400/40 text-orange-100"
-                      : "bg-white/5 text-white/50 hover:bg-white/10"
-                  )}
-                  onClick={() => goTo(i)}>
-                  <span className="text-[10px] font-bold text-white/30 block mb-1">
-                    After {m.san}
-                  </span>
-                  {m.comment}
-                </div>
-              ) : null)}
-              {!chapter?.moves.some(m => m.comment) && (
-                <p className="text-[12px] text-white/25 text-center pt-4">No comments in this chapter</p>
-              )}
+            <div className="flex-1 p-4">
+              <AnimatePresence mode="wait">
+                {currentComment ? (
+                  <motion.div key={`comment-${moveIdx}`}
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.18 }}>
+                    <div className="rounded-2xl bg-orange-50 border border-orange-100 p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-6 h-6 rounded-full bg-[#f97316] flex items-center justify-center shrink-0">
+                          <MessageSquare size={11} className="text-white" />
+                        </div>
+                        <span className="text-[11px] font-bold text-orange-600">
+                          After {chapter?.moves[moveIdx]?.san}
+                        </span>
+                      </div>
+                      <p className="text-[13px] text-gray-700 leading-relaxed">{currentComment}</p>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div key="no-comment"
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="flex flex-col items-center justify-center h-full py-8 text-center">
+                    <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                      <MessageSquare size={16} className="text-gray-300" />
+                    </div>
+                    <p className="text-[12px] text-gray-400">
+                      {moveIdx < 0
+                        ? "Navigate moves to see comments"
+                        : "No comment on this move"}
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </div>
@@ -1600,16 +1631,15 @@ function BatchHistoryDrawer({ batch, studentId, onClose }) {
   }, [batch?.id, studentId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function openNotes(session) {
-    // Load PGN data if needed
     if (session.pgnIds?.length > 0) {
       const pgns = await getPgnsByIds(session.pgnIds);
       if (pgns.length > 0) {
-        setPgnTarget({ pgn: pgns[0] });
+        setPgnTarget({ pgn: pgns[0], title: session.title });
         return;
       }
     }
     if (session.pdfAttachments?.length > 0) {
-      setPdfTarget({ pdfs: session.pdfAttachments, idx: 0 });
+      setPdfTarget({ pdfs: session.pdfAttachments, idx: 0, title: session.title });
     }
   }
 
@@ -1725,19 +1755,19 @@ function BatchHistoryDrawer({ batch, studentId, onClose }) {
         </motion.aside>
       </AnimatePresence>
 
-      {/* PDF Viewer */}
       {pdfTarget && (
         <PdfViewer
           pdfs={pdfTarget.pdfs}
           initialIndex={pdfTarget.idx}
+          title={pdfTarget.title}
           onClose={() => setPdfTarget(null)}
         />
       )}
 
-      {/* PGN Viewer */}
       {pgnTarget && (
         <PgnViewer
           pgn={pgnTarget.pgn}
+          title={pgnTarget.title}
           onClose={() => setPgnTarget(null)}
         />
       )}
