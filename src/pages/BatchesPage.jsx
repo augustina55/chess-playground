@@ -300,31 +300,41 @@ function AddBatchDrawer({ open, onClose, onSave, defaultCoach, coaches = [] }) {
   );
 }
 
-// ── StudentManagementDrawer ───────────────────────────────────────────────────
+// ── CoachBatchDrawer ─────────────────────────────────────────────────────────
 
-function StudentManagementDrawer({ batch, open, onClose, academyStudents }) {
-  const [enrolled,  setEnrolled]  = useState([]);
-  const [loading,   setLoading]   = useState(false);
-  const [saving,    setSaving]    = useState(null); // studentId being saved
-  const [search,    setSearch]    = useState("");
+function CoachBatchDrawer({ batch, open, onClose, academyStudents }) {
+  const [enrolled,   setEnrolled]   = useState([]);
+  const [sessions,   setSessions]   = useState([]);
+  const [loading,    setLoading]    = useState(false);
+  const [saving,     setSaving]     = useState(null);
+  const [searchQ,    setSearchQ]    = useState("");
+  const [pdfTarget,  setPdfTarget]  = useState(null);
+  const [pgnTarget,  setPgnTarget]  = useState(null);
 
   useEffect(() => {
     if (!batch || !open) return;
     setLoading(true);
-    getBatchStudents(batch.id).then(s => { setEnrolled(s); setLoading(false); });
+    Promise.all([
+      getBatchStudents(batch.id),
+      getClassSessionsByBatch(batch.id),
+    ]).then(([sts, sess]) => {
+      setEnrolled(sts);
+      setSessions(sess.sort((a, b) => b.date.localeCompare(a.date)));
+      setLoading(false);
+    });
   }, [batch?.id, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const enrolledIds = useMemo(() => new Set(enrolled.map(s => s.id)), [enrolled]);
+  const enrolledIds = useMemo(() => new Set(enrolled.map(s => String(s.id))), [enrolled]);
 
   const available = useMemo(() =>
-    academyStudents.filter(s =>
+    (academyStudents || []).filter(s =>
       s.role === "student" &&
-      !enrolledIds.has(s.id) &&
-      (!search ||
-        s.name?.toLowerCase().includes(search.toLowerCase()) ||
-        s.batchCode?.toLowerCase().includes(search.toLowerCase()))
+      !enrolledIds.has(String(s.id)) &&
+      (!searchQ ||
+        s.name?.toLowerCase().includes(searchQ.toLowerCase()) ||
+        s.batchCode?.toLowerCase().includes(searchQ.toLowerCase()))
     ),
-    [academyStudents, enrolledIds, search]
+    [academyStudents, enrolledIds, searchQ]
   );
 
   async function handleAdd(student) {
@@ -343,23 +353,32 @@ function StudentManagementDrawer({ batch, open, onClose, academyStudents }) {
     } finally { setSaving(null); }
   }
 
+  async function openNotes(session) {
+    if (session.pgnIds?.length > 0) {
+      const pgns = await getPgnsByIds(session.pgnIds);
+      if (pgns.length > 0) { setPgnTarget({ pgn: pgns[0], title: session.title }); return; }
+    }
+    if (session.pdfAttachments?.length > 0)
+      setPdfTarget({ pdfs: session.pdfAttachments, idx: 0, title: session.title });
+  }
+
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
+    <>
+      <AnimatePresence>
+        {open && <motion.div key="cbd-overlay"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex justify-end"
-        >
-          <motion.aside
-            initial={{ x: 520 }} animate={{ x: 0 }} exit={{ x: 520 }}
-            transition={{ type: "spring", stiffness: 300, damping: 34 }}
-            className="w-full max-w-[480px] bg-[#f6f8fc] h-full flex flex-col overflow-hidden shadow-2xl"
+          className="fixed inset-0 bg-black/40 z-[100]" onClick={onClose} />}
+        {open && (
+          <motion.div key="cbd-panel"
+            initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
+            transition={{ type: "spring", stiffness: 280, damping: 32 }}
+            className="fixed inset-0 bg-[#f6f8fc] z-[110] flex flex-col shadow-2xl"
+            onClick={e => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-5 bg-white border-b border-gray-200 shrink-0">
+            <div className="shrink-0 flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200">
               <div className="min-w-0">
-                <h2 className="font-black text-[16px] text-gray-900 truncate">{batch?.name}</h2>
+                <h2 className="font-black text-[17px] text-gray-900 truncate">{batch?.name}</h2>
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className={cn("px-2 py-0.5 text-[10px] font-bold rounded-full border", LEVEL_CHIP[batch?.level] || LEVEL_CHIP.Open)}>
                     {batch?.level}
@@ -367,181 +386,251 @@ function StudentManagementDrawer({ batch, open, onClose, academyStudents }) {
                   <span className="text-[12px] text-gray-400">{enrolled.length} student{enrolled.length !== 1 ? "s" : ""}</span>
                 </div>
               </div>
-              <button onClick={onClose} className="w-9 h-9 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex items-center justify-center transition-colors shrink-0 ml-3">
-                <X size={17} />
+              <button onClick={onClose}
+                className="w-9 h-9 rounded-xl border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors shrink-0 ml-3">
+                <X size={16} />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto">
+            {/* Two-panel body */}
+            <div className="flex-1 flex overflow-hidden">
 
-              {/* Enrolled students */}
-              <div className="px-6 py-5">
-                <p className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 mb-3">
-                  Enrolled ({enrolled.length})
-                </p>
-                {loading ? (
-                  <p className="text-[13px] text-gray-400 py-4 text-center">Loading…</p>
-                ) : enrolled.length === 0 ? (
-                  <div className="py-6 text-center rounded-2xl border border-dashed border-gray-200 bg-white">
-                    <Users size={24} className="text-gray-200 mx-auto mb-2" />
-                    <p className="text-[13px] text-gray-400">No students yet</p>
+              {/* Left: Students */}
+              <div className="w-[280px] shrink-0 border-r border-gray-200 bg-white flex flex-col overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 shrink-0">
+                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400">
+                    Students ({enrolled.length})
+                  </p>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+                  {loading ? (
+                    <p className="text-[13px] text-gray-400 text-center py-8">Loading…</p>
+                  ) : enrolled.length === 0 ? (
+                    <div className="py-8 text-center rounded-2xl border border-dashed border-gray-200 mx-1">
+                      <Users size={22} className="text-gray-300 mx-auto mb-2" />
+                      <p className="text-[12px] text-gray-400">No students yet</p>
+                    </div>
+                  ) : enrolled.map(s => (
+                    <div key={s.id} className="flex items-center gap-2.5 px-3 py-2.5 bg-gray-50 rounded-xl border border-gray-200">
+                      <div className="w-8 h-8 rounded-full bg-brand-600 text-white flex items-center justify-center text-[12px] font-black shrink-0">
+                        {s.avatar || s.name?.[0]?.toUpperCase()}
+                      </div>
+                      <p className="flex-1 text-[13px] font-semibold text-gray-800 truncate">{s.name}</p>
+                      <button onClick={() => handleRemove(s)} disabled={saving === s.id}
+                        className="w-7 h-7 rounded-lg bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors shrink-0 disabled:opacity-50">
+                        {saving === s.id ? <span className="text-[9px]">…</span> : <UserMinus size={12} />}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add students */}
+                <div className="border-t border-gray-200 bg-white shrink-0 p-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-2">Add Students</p>
+                  <div className="relative mb-2">
+                    <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <input
+                      className="w-full h-8 pl-8 pr-3 rounded-xl border border-gray-200 bg-white text-[12px] outline-none focus:border-brand-500"
+                      placeholder="Search…"
+                      value={searchQ}
+                      onChange={e => setSearchQ(e.target.value)}
+                    />
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    {enrolled.map(s => (
-                      <div key={s.id} className="flex items-center gap-3 px-4 py-3 bg-white rounded-2xl border border-gray-200">
-                        <div className="w-9 h-9 rounded-full bg-brand-600 text-white flex items-center justify-center text-[13px] font-black shrink-0">
+                  <div className="max-h-[160px] overflow-y-auto space-y-1.5">
+                    {available.length === 0 ? (
+                      <p className="text-[12px] text-gray-400 text-center py-2">
+                        {searchQ ? "No matches" : "All enrolled"}
+                      </p>
+                    ) : available.map(s => (
+                      <div key={s.id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-xl border border-gray-200">
+                        <div className="w-7 h-7 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-[11px] font-black shrink-0">
                           {s.avatar || s.name?.[0]?.toUpperCase()}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-bold text-gray-800 truncate">{s.name}</p>
-                          {s.batchCode && (
-                            <p className="text-[11px] text-gray-400">{s.batchCode}</p>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleRemove(s)}
-                          disabled={saving === s.id}
-                          className="w-8 h-8 rounded-xl bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center transition-colors shrink-0 disabled:opacity-50">
-                          {saving === s.id ? <span className="text-[10px]">…</span> : <UserMinus size={14} />}
+                        <p className="flex-1 text-[12px] font-semibold text-gray-700 truncate">{s.name}</p>
+                        <button onClick={() => handleAdd(s)} disabled={saving === s.id}
+                          className="flex items-center gap-1 h-6 px-2 rounded-lg bg-brand-50 text-brand-600 text-[11px] font-bold hover:bg-brand-100 transition-colors disabled:opacity-50">
+                          {saving === s.id ? "…" : <><UserPlus size={11} />Add</>}
                         </button>
                       </div>
                     ))}
                   </div>
-                )}
+                </div>
               </div>
 
-              {/* Divider */}
-              <div className="mx-6 border-t border-gray-200" />
-
-              {/* Add students */}
-              <div className="px-6 py-5">
-                <p className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 mb-3">
-                  Add Students
-                </p>
-                <div className="relative mb-3">
-                  <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                  <input
-                    className="w-full h-10 pl-10 pr-4 rounded-xl border border-gray-200 bg-white text-[13px] outline-none focus:border-brand-500"
-                    placeholder="Search by name or batch code…"
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                  />
+              {/* Right: Sessions table */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="px-6 py-3 border-b border-gray-200 bg-gray-50/60 shrink-0 flex items-center justify-between">
+                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400">Class Sessions</p>
+                  <span className="text-[12px] text-gray-400">{sessions.length} session{sessions.length !== 1 ? "s" : ""}</span>
                 </div>
-                {available.length === 0 ? (
-                  <p className="text-[13px] text-gray-400 py-4 text-center">
-                    {search ? "No matches found" : "All academy students are enrolled"}
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {available.map(s => (
-                      <div key={s.id} className="flex items-center gap-3 px-4 py-3 bg-white rounded-2xl border border-gray-200">
-                        <div className="w-9 h-9 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-[13px] font-black shrink-0">
-                          {s.avatar || s.name?.[0]?.toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-bold text-gray-800 truncate">{s.name}</p>
-                          {s.batchCode && (
-                            <p className="text-[11px] text-gray-400">{s.batchCode}</p>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleAdd(s)}
-                          disabled={saving === s.id}
-                          className="flex items-center gap-1 h-8 px-3 rounded-xl bg-brand-50 text-brand-600 hover:bg-brand-100 text-[12px] font-bold transition-colors shrink-0 disabled:opacity-50">
-                          {saving === s.id ? "…" : <><UserPlus size={13} /><span>Add</span></>}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+
+                <div className="flex-1 overflow-y-auto">
+                  {loading ? (
+                    <div className="flex items-center justify-center py-20">
+                      <span className="w-7 h-7 rounded-full border-2 border-gray-200 border-t-brand-500 animate-spin" />
+                    </div>
+                  ) : sessions.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-center px-8">
+                      <CalendarDays size={36} className="text-gray-200 mb-3" />
+                      <p className="text-[15px] font-bold text-gray-500">No sessions recorded yet</p>
+                      <p className="text-[13px] text-gray-400 mt-1">Use the Calendar tab to log class sessions.</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-[13px]">
+                      <thead>
+                        <tr className="bg-white border-b border-gray-100 sticky top-0 z-10">
+                          <th className="text-left px-6 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Date</th>
+                          <th className="text-left px-4 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Topic</th>
+                          <th className="text-center px-4 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Session</th>
+                          <th className="text-center px-4 py-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Notes / PGN</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {sessions.map(s => {
+                          const held = s.presentCount > 0 || s.totalCount > 0 || !!s.title;
+                          const hasNotes = s.pgnIds?.length > 0 || s.pdfAttachments?.length > 0 || s.notes;
+                          return (
+                            <tr key={s.id} className="hover:bg-gray-50/60 transition-colors">
+                              <td className="px-6 py-3.5 text-gray-600 font-medium whitespace-nowrap">
+                                {new Date(s.date + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                              </td>
+                              <td className="px-4 py-3.5 text-gray-800 font-semibold max-w-[200px] truncate">
+                                {s.title || <span className="text-gray-300 font-normal">—</span>}
+                              </td>
+                              <td className="px-4 py-3.5 text-center">
+                                <span className={cn(
+                                  "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold",
+                                  held ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-400"
+                                )}>
+                                  <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", held ? "bg-emerald-500" : "bg-gray-400")} />
+                                  {held ? "Held" : "Not held"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3.5 text-center">
+                                {hasNotes ? (
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    {s.pgnIds?.length > 0 && (
+                                      <button onClick={() => openNotes(s)}
+                                        className="flex items-center gap-1 h-7 px-2.5 rounded-lg bg-brand-50 text-brand-600 hover:bg-brand-100 text-[11px] font-bold transition-colors">
+                                        <BookOpen size={11} />PGN
+                                      </button>
+                                    )}
+                                    {s.pdfAttachments?.length > 0 && (
+                                      <button onClick={() => setPdfTarget({ pdfs: s.pdfAttachments, idx: 0, title: s.title })}
+                                        className="flex items-center gap-1 h-7 px-2.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 text-[11px] font-bold transition-colors">
+                                        <FileText size={11} />PDF
+                                      </button>
+                                    )}
+                                    {!s.pgnIds?.length && !s.pdfAttachments?.length && s.notes && (
+                                      <span className="text-[12px] text-gray-500 italic max-w-[160px] truncate">{s.notes}</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-300 text-[11px]">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               </div>
             </div>
-          </motion.aside>
-        </motion.div>
-      )}
-    </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {pdfTarget && <PdfViewer pdfs={pdfTarget.pdfs} initialIndex={pdfTarget.idx} title={pdfTarget.title} onClose={() => setPdfTarget(null)} />}
+      {pgnTarget && <PgnViewer pgn={pgnTarget.pgn} title={pgnTarget.title} onClose={() => setPgnTarget(null)} />}
+    </>
   );
 }
 
-// ── BatchRow ──────────────────────────────────────────────────────────────────
+// ── CoachBatchCard ────────────────────────────────────────────────────────────
 
-function BatchRow({ batch, studentCount, onDelete, onClick, canManage }) {
+function CoachBatchCard({ batch, studentCount, onDelete, onClick, canManage, academy }) {
   const active = batch.isActive !== false;
   const sched  = scheduleSummary(batch);
 
   return (
     <div
       onClick={onClick}
-      className="group flex items-start gap-4 px-5 py-4 border-b border-gray-100 last:border-0 hover:bg-gray-50/60 transition-colors cursor-pointer"
+      className="group relative flex items-center gap-4 px-5 py-4 bg-white border border-gray-200 rounded-2xl cursor-pointer transition-all hover:shadow-md hover:border-gray-300 overflow-hidden"
     >
-      {/* Left: code + name + level */}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 mb-0.5">
-          <span className="text-[11px] font-black text-gray-400 tracking-wider">{batch.id}</span>
+      {/* Level color bar */}
+      <div className={cn("absolute left-0 top-0 bottom-0 w-1", LEVEL_BAR[batch.level] || "bg-gray-300")} />
+
+      {/* Left: level chip + name + meta */}
+      <div className="flex-1 min-w-0 pl-2">
+        <div className="flex items-center gap-2 mb-1">
           <span className={cn("px-2 py-0.5 text-[10px] font-bold rounded-full border", LEVEL_CHIP[batch.level] || LEVEL_CHIP.Open)}>
             {batch.level}
           </span>
+          <span className={cn(
+            "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold",
+            active ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"
+          )}>
+            <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", active ? "bg-emerald-500" : "bg-red-500")} />
+            {active ? "Active" : "Inactive"}
+          </span>
         </div>
-        <p className="text-[14px] font-bold text-gray-900 truncate leading-snug">{batch.name}</p>
-        <div className="flex items-center gap-3 mt-1.5">
+        <p className="text-[15px] font-black text-gray-900 truncate">{batch.name}</p>
+        <div className="flex items-center gap-3 mt-1">
           <span className="flex items-center gap-1 text-[12px] text-gray-500">
             <Users size={12} className="shrink-0" />
-            {studentCount}
+            {studentCount} student{studentCount !== 1 ? "s" : ""}
           </span>
           {sched && (
             <span className="flex items-center gap-1 text-[12px] text-gray-500">
-              <Clock size={11} className="shrink-0" />
-              {sched}
+              <Clock size={11} className="shrink-0" />{sched}
             </span>
           )}
           {batch.meetingLink && (
             <a href={batch.meetingLink} target="_blank" rel="noreferrer"
               onClick={e => e.stopPropagation()}
               className="flex items-center gap-1 text-[12px] text-brand-600 hover:underline">
-              <Link2 size={11} />Link
+              <Link2 size={11} />Join
             </a>
           )}
         </div>
       </div>
 
-      {/* Coach */}
-      <div className="hidden sm:flex flex-col justify-center w-28 shrink-0 pt-0.5">
-        <p className="text-[12px] font-medium text-gray-500 truncate">{batch.coach || "—"}</p>
-      </div>
-
-      {/* Active badge */}
-      <div className="shrink-0 pt-0.5">
-        <span className={cn(
-          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold whitespace-nowrap",
-          active ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"
-        )}>
-          <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", active ? "bg-emerald-500" : "bg-red-500")} />
-          {active ? "Active" : "Inactive"}
-        </span>
-      </div>
-
-      {/* Manage + Delete — coach/admin only */}
-      {canManage && (
-        <div className="flex items-center gap-1 shrink-0 mt-0.5">
-          <span className="opacity-0 group-hover:opacity-100 text-[11px] font-bold text-brand-600 px-2 py-1 rounded-lg bg-brand-50 transition-all whitespace-nowrap">
-            Manage
-          </span>
+      {/* Right: academy info + delete */}
+      <div className="flex items-center gap-2.5 shrink-0">
+        {academy && (
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-full bg-[#f97316] flex items-center justify-center overflow-hidden shrink-0 border border-gray-200">
+              {academy.logo
+                ? <img src={academy.logo} alt="" className="w-full h-full object-cover" />
+                : <span className="text-white text-[10px] font-black">{academy.name?.[0] || "A"}</span>
+              }
+            </div>
+            <span className="text-[12px] font-semibold text-gray-500 hidden sm:block max-w-[100px] truncate">
+              {academy.name}
+            </span>
+          </div>
+        )}
+        {canManage && (
           <button onClick={e => { e.stopPropagation(); onDelete(batch.id); }}
-            className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all">
+            className="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-xl bg-red-50 text-red-500 flex items-center justify-center transition-all shrink-0">
             <Trash2 size={13} />
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
 
 // ── MyBatchesTab ──────────────────────────────────────────────────────────────
 
-function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, academyStudents, academyCoaches = [] }) {
+function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, academyStudents, academyCoaches = [], academy }) {
   const [showAdd, setShowAdd]   = useState(false);
   const [selected, setSelected] = useState(null);
+
+  const canManage = user?.role === "admin" || user?.role === "coach" || user?.role === "academy";
 
   const filtered = batches.filter(b =>
     !search ||
@@ -550,10 +639,6 @@ function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, a
     b.level?.toLowerCase().includes(search.toLowerCase())
   );
 
-  async function handleSave(form) {
-    await onAdd(form);
-  }
-
   return (
     <>
       <div className="flex items-center justify-between mb-6">
@@ -561,7 +646,7 @@ function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, a
           <h2 className="text-[20px] font-black text-gray-900">Batches</h2>
           <p className="text-[12px] text-gray-400 mt-0.5">{batches.length} batch{batches.length !== 1 ? "es" : ""}</p>
         </div>
-        {(user?.role === "admin" || user?.role === "coach") && (
+        {canManage && (
           <button onClick={() => setShowAdd(true)}
             className="flex items-center gap-2 h-10 px-5 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-semibold shadow-lg shadow-brand-500/20 transition-all">
             <Plus size={15} />Add Batch
@@ -578,7 +663,7 @@ function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, a
           <p className="text-[13px] text-gray-400 mt-1.5 max-w-xs">
             {search ? "Try a different search term." : "Create your first batch to start organising students."}
           </p>
-          {!search && (
+          {canManage && !search && (
             <button onClick={() => setShowAdd(true)}
               className="mt-5 h-10 px-5 rounded-xl bg-brand-600 text-white text-[13px] font-semibold">
               Add Batch
@@ -586,21 +671,16 @@ function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, a
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-[24px] border border-gray-200 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-4 px-5 py-3 border-b border-gray-100 bg-gray-50/80">
-            <p className="flex-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Batch</p>
-            <p className="hidden sm:block w-28 shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400">Coach</p>
-            <p className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400">Status</p>
-            <span className="w-24 shrink-0" />
-          </div>
+        <div className="space-y-3">
           {filtered.map(b => (
-            <BatchRow
+            <CoachBatchCard
               key={b.id}
               batch={b}
               studentCount={studentCounts[b.id] || 0}
               onDelete={onDelete}
-              onClick={() => (user?.role === "admin" || user?.role === "coach") ? setSelected(b) : null}
-              canManage={user?.role === "admin" || user?.role === "coach"}
+              onClick={() => canManage ? setSelected(b) : null}
+              canManage={canManage}
+              academy={academy}
             />
           ))}
         </div>
@@ -609,12 +689,12 @@ function MyBatchesTab({ batches, studentCounts, onAdd, onDelete, search, user, a
       <AddBatchDrawer
         open={showAdd}
         onClose={() => setShowAdd(false)}
-        onSave={handleSave}
+        onSave={form => onAdd(form)}
         defaultCoach={user?.name || ""}
         coaches={academyCoaches}
       />
 
-      <StudentManagementDrawer
+      <CoachBatchDrawer
         batch={selected}
         open={!!selected}
         onClose={() => setSelected(null)}
@@ -2044,14 +2124,15 @@ function CoachAdminBatchesView({ search }) {
   const [academyCoaches,  setAcademyCoaches]  = useState([]);
   const [tab,             setTab]             = useState("batches");
 
-  // Phase 1 — discover which academies this coach belongs to
+  // Phase 1 — discover which academies this coach/academy belongs to
   useEffect(() => {
     if (!user?.id) return;
-    if (user?.role !== "coach") {
+    if (user?.role !== "coach" && user?.role !== "academy") {
       setAcademiesReady(true);  // admin: skip, load all batches
       return;
     }
-    Promise.all([getAcademies(), getCoachAcademies(user.id)]).then(([allAc, invs]) => {
+    const invitedPromise = user.role === "coach" ? getCoachAcademies(user.id) : Promise.resolve([]);
+    Promise.all([getAcademies(), invitedPromise]).then(([allAc, invs]) => {
       const list = [];
       const own = allAc.find(a => String(a.mainCoachId) === String(user.id));
       if (own) list.push({ id: own.id, name: own.name, logo: own.logo, isOwn: true });
@@ -2113,7 +2194,7 @@ function CoachAdminBatchesView({ search }) {
       id,
       students: [],
       academyId: selectedId || null,
-      coachId:   batch.coachId || (user?.role === "coach" ? user?.id : null),
+      coachId:   batch.coachId || (["coach","academy"].includes(user?.role) ? user?.id : null),
     });
     setBatches(prev => [...prev, created]);
   }
@@ -2186,6 +2267,7 @@ function CoachAdminBatchesView({ search }) {
             user={user}
             academyStudents={academyStudents}
             academyCoaches={academyCoaches}
+            academy={selectedAcademy}
           />
         )}
         {tab === "calendar" && (
