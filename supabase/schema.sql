@@ -79,17 +79,18 @@ create table if not exists puzzles (
 );
 
 create table if not exists homework (
-  id           text        primary key,
-  title        text        not null,
-  batch_id     text,
-  batch_name   text,
-  pgn_id       text,
-  pgn_name     text,
-  due_date     text,
-  notes        text,
-  assigned_by  text,
-  academy_id   bigint      references academies(id) on delete set null,
-  created_at   timestamptz not null default now()
+  id             text        primary key,
+  title          text        not null,
+  batch_id       text,
+  batch_name     text,
+  pgn_id         text,
+  pgn_name       text,
+  due_date       text,
+  notes          text,
+  assigned_by    text,
+  academy_id     bigint      references academies(id) on delete set null,
+  engine_explore boolean     not null default false,
+  created_at     timestamptz not null default now()
 );
 
 create table if not exists race_scores (
@@ -126,6 +127,11 @@ exception when duplicate_column then null; end $$;
 -- homework: academy_id (if table was created without it)
 do $$ begin
   alter table homework add column academy_id bigint references academies(id) on delete set null;
+exception when duplicate_column then null; end $$;
+
+-- homework: engine_explore flag
+do $$ begin
+  alter table homework add column engine_explore boolean not null default false;
 exception when duplicate_column then null; end $$;
 
 -- ── batch_students: junction table ───────────────────────────────────────────

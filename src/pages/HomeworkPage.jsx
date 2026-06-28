@@ -565,10 +565,12 @@ export function HWPlayer({ hw, onBack }) {
                         {submitting ? "Submitting…" : "Submit Answer"}
                       </button>
                     </div>
-                    <button onClick={startExplore}
-                      className="w-full h-10 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[12px] font-bold flex items-center justify-center gap-1.5 transition-colors">
-                      <Zap size={13} />Explore with Engine
-                    </button>
+                    {hw.engineExplore && (
+                      <button onClick={startExplore}
+                        className="w-full h-10 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[12px] font-bold flex items-center justify-center gap-1.5 transition-colors">
+                        <Zap size={13} />Explore with Engine
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

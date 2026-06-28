@@ -571,7 +571,7 @@ function CoachBatchDrawer({ batch, open, onClose, academyStudents, academyId, us
 
 function AddHomeworkModal({ batch, academyId, assignedBy, onClose }) {
   const [pgns,    setPgns]    = useState([]);
-  const [form,    setForm]    = useState({ title: "", dueDate: "", pgnId: "" });
+  const [form,    setForm]    = useState({ title: "", dueDate: "", pgnId: "", engineExplore: false });
   const [saving,  setSaving]  = useState(false);
   const [saved,   setSaved]   = useState(false);
 
@@ -592,9 +592,10 @@ function AddHomeworkModal({ batch, academyId, assignedBy, onClose }) {
         batchName:   batch?.name   || null,
         pgnId:       pgn?.id       || null,
         pgnName:     pgn?.name     || null,
-        dueDate:     form.dueDate  || null,
-        assignedBy:  assignedBy    || null,
-        academyId:   academyId     || null,
+        dueDate:       form.dueDate      || null,
+        assignedBy:    assignedBy        || null,
+        academyId:     academyId         || null,
+        engineExplore: form.engineExplore,
       });
       setSaved(true);
       setTimeout(onClose, 900);
@@ -658,6 +659,37 @@ function AddHomeworkModal({ batch, academyId, assignedBy, onClose }) {
               ))}
             </select>
           </div>
+
+          {/* Engine Explore toggle */}
+          <button
+            type="button"
+            onClick={() => setForm(f => ({ ...f, engineExplore: !f.engineExplore }))}
+            className={cn(
+              "w-full flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all",
+              form.engineExplore
+                ? "border-orange-400 bg-orange-50"
+                : "border-gray-200 bg-white hover:border-gray-300"
+            )}
+          >
+            <div className="flex items-center gap-2.5">
+              <TrendingUp size={14} className={form.engineExplore ? "text-orange-500" : "text-gray-400"} />
+              <div className="text-left">
+                <p className={cn("text-[13px] font-bold", form.engineExplore ? "text-orange-700" : "text-gray-700")}>
+                  Engine Exploration
+                </p>
+                <p className="text-[11px] text-gray-400">Students explore top 3 engine replies</p>
+              </div>
+            </div>
+            <div className={cn(
+              "w-10 h-6 rounded-full relative transition-colors shrink-0",
+              form.engineExplore ? "bg-orange-500" : "bg-gray-200"
+            )}>
+              <div className={cn(
+                "absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all",
+                form.engineExplore ? "left-5" : "left-1"
+              )} />
+            </div>
+          </button>
 
           <button
             type="submit"

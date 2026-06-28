@@ -244,17 +244,18 @@ export async function getPuzzlesByPgnId(pgnId) {
 
 function hwFromDb(row) {
   return {
-    id:          row.id,
-    title:       row.title,
-    batchId:     row.batch_id,
-    batchName:   row.batch_name,
-    pgnId:       row.pgn_id,
-    pgnName:     row.pgn_name,
-    dueDate:     row.due_date,
-    notes:       row.notes,
-    assignedBy:  row.assigned_by,
-    academyId:   row.academy_id  || null,
-    createdAt:   row.created_at,
+    id:            row.id,
+    title:         row.title,
+    batchId:       row.batch_id,
+    batchName:     row.batch_name,
+    pgnId:         row.pgn_id,
+    pgnName:       row.pgn_name,
+    dueDate:       row.due_date,
+    notes:         row.notes,
+    assignedBy:    row.assigned_by,
+    academyId:     row.academy_id     || null,
+    engineExplore: row.engine_explore || false,
+    createdAt:     row.created_at,
   }
 }
 
@@ -278,8 +279,9 @@ export async function createHomework(hw) {
       pgn_name:    hw.pgnName    || null,
       due_date:    hw.dueDate    || null,
       notes:       hw.notes      || null,
-      assigned_by: hw.assignedBy || null,
-      academy_id:  hw.academyId  || null,
+      assigned_by:    hw.assignedBy    || null,
+      academy_id:     hw.academyId     || null,
+      engine_explore: hw.engineExplore || false,
     })
     .select()
     .single()
