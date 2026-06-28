@@ -473,6 +473,42 @@ export async function saveSubmissionReview(homeworkId, studentId, puzzleId, corr
   }
 }
 
+// ── Notifications ─────────────────────────────────────────────────────────────
+
+export async function createNotifications(records) {
+  if (!records || records.length === 0) return
+  const { error } = await db()
+    .from('notifications')
+    .insert(records.map(r => ({
+      user_id: r.userId,
+      type:    r.type || 'homework_review',
+      title:   r.title,
+      message: r.message,
+      data:    r.data || null,
+      read:    false,
+    })))
+  if (error) console.error('[notifications] create failed:', error.message)
+}
+
+export async function getNotificationsForUser(userId) {
+  const { data, error } = await db()
+    .from('notifications')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(20)
+  if (error) return []
+  return data || []
+}
+
+export async function markNotificationsRead(userId) {
+  await db()
+    .from('notifications')
+    .update({ read: true })
+    .eq('user_id', userId)
+    .eq('read', false)
+}
+
 // ── Academy invitations (coach invite / accept flow) ─────────────────────────
 
 function invitationFromDb(row) {

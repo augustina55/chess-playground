@@ -403,7 +403,7 @@ function CoachBatchDrawer({ batch, open, onClose, academyStudents, academyId, us
             </div>
 
             {/* Two-panel body */}
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex overflow-hidden min-h-0">
 
               {/* Left: Students */}
               <div className="w-[280px] shrink-0 border-r border-gray-200 bg-white flex flex-col overflow-hidden">
@@ -988,6 +988,72 @@ function ClassSessionDrawer({ open, batch, date, academyId, onClose, onSessionSa
     }
   }
 
+  async function autoSaveAttendance(studentId, val) {
+    if (!batch || !dateStr) return;
+    try {
+      await upsertAttendance([{
+        batch_id: batch.id, student_id: studentId, date: dateStr, present: val,
+        academy_id: academyId || null,
+      }]);
+      const updPresent = { ...present, [studentId]: val };
+      const pCount = students.filter(s => updPresent[s.id] === true).length;
+      const tCount = students.length;
+      const payload = {
+        batchId: batch.id, batchName: batch.name, academyId, date: dateStr,
+        ...form, presentCount: tCount > 0 ? pCount : null, totalCount: tCount > 0 ? tCount : null,
+      };
+      let saved;
+      if (session?.id) saved = await updateClassSession(session.id, payload);
+      else saved = await createClassSession(payload);
+      setSession(saved);
+      if (onSessionSaved) onSessionSaved(saved);
+    } catch (err) { console.error('Attendance auto-save failed:', err); }
+  }
+
+  async function markAllPresent() {
+    if (!batch || !dateStr || students.length === 0) return;
+    const newPresent = {};
+    students.forEach(s => { newPresent[s.id] = true; });
+    setPresent(newPresent);
+    try {
+      await upsertAttendance(students.map(s => ({
+        batch_id: batch.id, student_id: s.id, date: dateStr, present: true,
+        academy_id: academyId || null,
+      })));
+      const pCount = students.length;
+      const payload = {
+        batchId: batch.id, batchName: batch.name, academyId, date: dateStr,
+        ...form, presentCount: pCount, totalCount: pCount,
+      };
+      let saved;
+      if (session?.id) saved = await updateClassSession(session.id, payload);
+      else saved = await createClassSession(payload);
+      setSession(saved);
+      if (onSessionSaved) onSessionSaved(saved);
+    } catch (err) { console.error('Mark all present failed:', err); }
+  }
+
+  async function autoSaveNotes() {
+    if (!batch || !dateStr) return;
+    setSaving(true);
+    try {
+      const pCount = students.filter(s => present[s.id] === true).length;
+      const tCount = students.length;
+      const payload = {
+        batchId: batch.id, batchName: batch.name, academyId, date: dateStr,
+        ...form, presentCount: tCount > 0 ? pCount : null, totalCount: tCount > 0 ? tCount : null,
+      };
+      let savedSession;
+      if (session?.id) savedSession = await updateClassSession(session.id, payload);
+      else savedSession = await createClassSession(payload);
+      setSession(savedSession);
+      if (onSessionSaved) onSessionSaved(savedSession);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) { console.error('Notes auto-save failed:', err); }
+    finally { setSaving(false); }
+  }
+
   async function handlePgnFile(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -1073,54 +1139,62 @@ function ClassSessionDrawer({ open, batch, date, academyId, onClose, onSessionSa
                 <span className="w-7 h-7 rounded-full border-2 border-brand-300 border-t-brand-600 animate-spin" />
               </div>
             ) : tab === "attendance" ? (
-              <div className="flex-1 overflow-y-auto px-5 py-5 space-y-2.5">
+              <div className="flex-1 flex flex-col min-h-0">
+                {/* Fixed header: counts + mark all */}
                 {students.length > 0 && (
-                  <div className="flex items-center gap-4 mb-3 px-1">
+                  <div className="shrink-0 flex items-center gap-4 px-5 py-3 bg-white border-b border-gray-100">
                     <span className="flex items-center gap-1.5 text-[12px] font-bold text-emerald-600">
                       <Check size={12} strokeWidth={3} />{presentCount} present
                     </span>
                     <span className="flex items-center gap-1.5 text-[12px] font-bold text-red-500">
                       <X size={12} strokeWidth={2.5} />{absentCount} absent
                     </span>
-                    <button type="button" onClick={() => {
-                        const m = {};
-                        students.forEach(s => { m[s.id] = true; });
-                        setPresent(m);
-                      }}
+                    <button type="button" onClick={markAllPresent}
                       className="ml-auto text-[11px] font-bold text-brand-600 hover:underline">
                       Mark all present
                     </button>
                   </div>
                 )}
-                {students.length === 0 ? (
-                  <div className="py-14 flex flex-col items-center text-center">
-                    <Users size={32} className="text-gray-200 mb-3" />
-                    <p className="text-[14px] font-bold text-gray-400">No students in this batch</p>
-                    <p className="text-[12px] text-gray-400 mt-1">Add students via Batch management.</p>
-                  </div>
-                ) : students.map(s => (
-                  <StudentToggle key={s.id} student={s} present={present[s.id]} onChange={(id, val) => setPresent(prev => ({ ...prev, [id]: val }))} />
-                ))}
+                {/* Scrollable: student list */}
+                <div className="flex-1 overflow-y-auto px-5 py-3 space-y-2">
+                  {students.length === 0 ? (
+                    <div className="py-14 flex flex-col items-center text-center">
+                      <Users size={32} className="text-gray-200 mb-3" />
+                      <p className="text-[14px] font-bold text-gray-400">No students in this batch</p>
+                      <p className="text-[12px] text-gray-400 mt-1">Add students via Batch management.</p>
+                    </div>
+                  ) : students.map(s => (
+                    <StudentToggle key={s.id} student={s} present={present[s.id]}
+                      onChange={(id, val) => {
+                        setPresent(prev => ({ ...prev, [id]: val }));
+                        autoSaveAttendance(id, val);
+                      }} />
+                  ))}
+                </div>
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto px-5 py-5 space-y-7">
-                {/* Session title + notes */}
-                <div className="space-y-3">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 px-1">Session</p>
+              <div className="flex-1 flex flex-col min-h-0">
+                {/* Fixed: session title + notes inputs */}
+                <div className="shrink-0 px-5 py-4 bg-white border-b border-gray-100 space-y-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Session Notes</p>
                   <input
                     className="w-full h-11 rounded-2xl border border-gray-200 bg-white px-4 text-[13px] text-gray-800 placeholder:text-gray-400 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
                     placeholder="Session title (e.g. Endgame Techniques)"
                     value={form.title}
                     onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                    onBlur={autoSaveNotes}
                   />
                   <textarea
-                    rows={5}
+                    rows={4}
                     className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-800 placeholder:text-gray-400 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all resize-none"
                     placeholder="Topics covered, key ideas, homework reminders…"
                     value={form.notes}
                     onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                    onBlur={autoSaveNotes}
                   />
                 </div>
+                {/* Scrollable: PGN + PDF files */}
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
 
                 {/* PGN files */}
                 <div className="space-y-3">
@@ -1201,23 +1275,18 @@ function ClassSessionDrawer({ open, batch, date, academyId, onClose, onSessionSa
                   )}
                 </div>
               </div>
+            </div>
             )}
 
-            {/* Footer */}
-            <div className="shrink-0 px-5 py-5 bg-white border-t border-gray-200 flex gap-3">
+            {/* Footer — slim close bar */}
+            <div className="shrink-0 px-5 py-3 bg-white border-t border-gray-100 flex items-center justify-between">
+              <span className="text-[11px] text-gray-400 flex items-center gap-1.5">
+                {saving && <span className="w-3 h-3 rounded-full border border-gray-300 border-t-brand-500 animate-spin" />}
+                {saved ? <><Check size={10} className="text-emerald-500" strokeWidth={3} />Saved</> : "Auto-saved"}
+              </span>
               <button type="button" onClick={onClose}
-                className="flex-1 h-12 rounded-2xl border border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition-colors text-[13px]">
+                className="h-8 px-4 rounded-xl border border-gray-200 text-[12px] font-medium text-gray-600 hover:bg-gray-50 transition-colors">
                 Close
-              </button>
-              <button type="button" onClick={handleSave} disabled={saving}
-                className={cn("flex-[2] h-12 rounded-2xl font-bold text-[14px] flex items-center justify-center gap-2 transition-all",
-                  saved ? "bg-emerald-500 text-white" : "bg-[#1a140f] hover:bg-[#2a201a] text-white",
-                  saving && "opacity-60 cursor-wait")}>
-                {saving ? (
-                  <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                ) : saved ? (
-                  <><Check size={14} strokeWidth={3} />Saved</>
-                ) : "Save Session"}
               </button>
             </div>
           </motion.aside>

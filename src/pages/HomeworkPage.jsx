@@ -14,11 +14,12 @@ import { cn } from "../lib/utils";
 import {
   getHomework, getHomeworkForBatch, getHomeworkByAcademy,
   createHomework, deleteHomework,
-  getBatches, getPgns, getPuzzlesByPgnId,
+  getBatches, getPgns, getPgnsByIds, getPuzzlesByPgnId,
   getProfiles, getProfilesByAcademy, getAcademies,
   submitPuzzleAnswer, getStudentSubmissions,
   getAllSubmissionsForHomework, getFullSubmissionsForStudent,
-  saveSubmissionReview,
+  saveSubmissionReview, createNotifications,
+  getNotificationsForUser, markNotificationsRead,
 } from "../lib/db";
 
 const inputCls =
@@ -76,6 +77,11 @@ export function HWPlayer({ hw, onBack }) {
   const [submissionsMap, setSubmissionsMap] = useState({});
   const [submitting,     setSubmitting]     = useState(false);
   const [saveError,      setSaveError]      = useState(null);
+  const [puzzleComments, setPuzzleComments] = useState({});
+  const [autoMovePending, setAutoMovePending] = useState(false);
+  const [retrying,       setRetrying]       = useState(false);
+  const [bubble,         setBubble]         = useState(null); // {type:'correct'|'wrong', msg}
+  const boardMoveCountRef = useRef(0);
   const posListRef = useRef(null);
 
   // ── Engine Explore ──────────────────────────────────────────────────────────
@@ -277,15 +283,31 @@ export function HWPlayer({ hw, onBack }) {
     if (!hw.pgnId) { setPuzzlesOk(true); return; }
     Promise.all([
       getPuzzlesByPgnId(hw.pgnId),
+      getPgnsByIds([hw.pgnId]),
       user?.id ? getStudentSubmissions(hw.id, user.id) : Promise.resolve([]),
-    ]).then(([pzls, subs]) => {
+    ]).then(([pzls, pgns, subs]) => {
+      // Extract initial PGN comment for each puzzle (e.g. "White to play and win")
+      const comments = {};
+      const pgnContent = pgns[0]?.content || '';
+      if (pgnContent) {
+        const games = pgnContent.split(/(?=\[Event\s)/g).filter(g => g.trim().length > 10);
+        games.forEach((gamePgn, gIdx) => {
+          const pzlId = `${hw.pgnId}-g${gIdx}`;
+          const noHeaders = gamePgn.replace(/\[[^\]]*\]/g, '').trim();
+          const m = noHeaders.match(/^\{([^}]+)\}/);
+          if (m) comments[pzlId] = m[1].trim();
+        });
+      }
+      setPuzzleComments(comments);
+
       setPuzzles(pzls);
       const smap = {};
       subs.forEach(s => { smap[s.puzzleId] = s; });
       setSubmissionsMap(smap);
-      const firstUnsub = pzls.findIndex(p => !smap[p.id]);
+      const firstUnsub = pzls.findIndex(p => !smap[p.id] || (smap[p.id]?.correct === false && smap[p.id]?.reviewed));
       const start = firstUnsub >= 0 ? firstUnsub : 0;
       setIdx(start);
+      boardMoveCountRef.current = 0;
       if (pzls[start]) {
         const sub = smap[pzls[start].id];
         setBoardFen(sub?.moves?.length ? replayMoves(pzls[start].fen, sub.moves) : pzls[start].fen);
@@ -300,6 +322,10 @@ export function HWPlayer({ hw, onBack }) {
     setIdx(i);
     setMovesUCI([]);
     setMovesSAN([]);
+    setRetrying(false);
+    setBubble(null);
+    setAutoMovePending(false);
+    boardMoveCountRef.current = 0;
     const sub = submissionsMap[pzl.id];
     setBoardFen(sub?.moves?.length ? replayMoves(pzl.fen, sub.moves) : pzl.fen);
     setTimeout(() => {
@@ -309,39 +335,103 @@ export function HWPlayer({ hw, onBack }) {
 
   function handleDrop({ sourceSquare, targetSquare }) {
     const pzl = puzzles[idx];
-    if (!pzl || submissionsMap[pzl.id]) return false;
+    if (!pzl || (submissionsMap[pzl.id] && !retrying) || autoMovePending) return false;
     let g;
     try { g = new Chess(boardFen); } catch { return false; }
     let move = null;
     try { move = g.move({ from: sourceSquare, to: targetSquare, promotion: "q" }); } catch {}
     if (!move) return false;
-    setBoardFen(g.fen());
-    setMovesUCI(prev => [...prev, sourceSquare + targetSquare]);
+
+    const uci = sourceSquare + targetSquare;
+    const newFen = g.fen();
+
+    // During re-attempt: validate against solution
+    if (retrying) {
+      const expectedUci = pzl.solution?.[boardMoveCountRef.current];
+      if (expectedUci && uci.slice(0, 4) !== expectedUci.slice(0, 4)) {
+        const comment = puzzleComments[pzl.id];
+        setBubble({ type: 'wrong', msg: comment ? `Wrong! Think again.\n${comment}` : 'Wrong! Think again.' });
+        setTimeout(() => setBubble(null), 2800);
+        return false;
+      }
+      setBubble({ type: 'correct', msg: 'Correct move! ✓' });
+      setTimeout(() => setBubble(null), 900);
+    }
+
+    setBoardFen(newFen);
+    const newUciList = [...movesUCI, uci];
+    setMovesUCI(newUciList);
     setMovesSAN(prev => [...prev, move.san]);
+    boardMoveCountRef.current += 1;
+
+    // Auto-play opponent move from PGN solution
+    const oppUci = pzl.solution?.[boardMoveCountRef.current];
+    if (oppUci && !g.isGameOver()) {
+      setAutoMovePending(true);
+      const fenBeforeOpp = newFen;
+      const totalBefore = boardMoveCountRef.current;
+      setTimeout(() => {
+        const r = applyUci(fenBeforeOpp, oppUci);
+        if (r) {
+          setBoardFen(r.fen);
+          setMovesUCI(prev => [...prev, oppUci]);
+          setMovesSAN(prev => [...prev, r.san]);
+          boardMoveCountRef.current = totalBefore + 1;
+        }
+        setAutoMovePending(false);
+        // On retry: auto-submit when solution exhausted
+        if (retrying && boardMoveCountRef.current >= (pzl.solution?.length || 0)) {
+          setBubble({ type: 'correct', msg: '🎉 All correct! Submitting…' });
+          setTimeout(() => submitAnswer(newUciList.concat(r ? [oppUci] : [])), 600);
+        }
+      }, 650);
+    } else if (retrying && boardMoveCountRef.current >= (pzl.solution?.length || 0)) {
+      // Solution exhausted, last move was user's
+      setBubble({ type: 'correct', msg: '🎉 All correct! Submitting…' });
+      setTimeout(() => submitAnswer(newUciList), 700);
+    }
+
     return true;
   }
 
   function reset() {
     const pzl = puzzles[idx];
-    if (!pzl || submissionsMap[pzl.id]) return;
+    if (!pzl || (submissionsMap[pzl.id] && !retrying)) return;
     setBoardFen(pzl.fen);
     setMovesUCI([]);
     setMovesSAN([]);
+    setBubble(null);
+    setAutoMovePending(false);
+    boardMoveCountRef.current = 0;
   }
 
-  async function submit() {
+  function startRetry() {
     const pzl = puzzles[idx];
-    if (!pzl || !user?.id || movesUCI.length === 0 || submitting) return;
+    if (!pzl) return;
+    setRetrying(true);
+    setBoardFen(pzl.fen);
+    setMovesUCI([]);
+    setMovesSAN([]);
+    setBubble(null);
+    setAutoMovePending(false);
+    boardMoveCountRef.current = 0;
+  }
+
+  async function submitAnswer(overrideMoves) {
+    const pzl = puzzles[idx];
+    const moves = overrideMoves || movesUCI;
+    if (!pzl || !user?.id || moves.length === 0 || submitting) return;
     setSubmitting(true);
     setSaveError(null);
     try {
-      await submitPuzzleAnswer(hw.id, user.id, pzl.id, movesUCI);
-      const newSub = { puzzleId: pzl.id, moves: [...movesUCI], correct: null, reviewed: false, submittedAt: new Date().toISOString() };
+      await submitPuzzleAnswer(hw.id, user.id, pzl.id, moves);
+      const newSub = { puzzleId: pzl.id, moves: [...moves], correct: null, reviewed: false, submittedAt: new Date().toISOString() };
+      setRetrying(false);
+      setBubble(null);
       setSubmissionsMap(prev => {
         const next = { ...prev, [pzl.id]: newSub };
-        // Navigate to next unsubmitted puzzle
-        const nextIdx = puzzles.findIndex((p, i) => i > idx && !next[p.id]);
-        if (nextIdx >= 0) setTimeout(() => loadPuzzle(nextIdx), 600);
+        const nextIdx = puzzles.findIndex((p, i) => i > idx && (!next[p.id] || (next[p.id]?.reviewed && next[p.id]?.correct === false)));
+        if (nextIdx >= 0) setTimeout(() => loadPuzzle(nextIdx), 700);
         return next;
       });
     } catch (err) {
@@ -414,7 +504,7 @@ export function HWPlayer({ hw, onBack }) {
                   : handleDrop,
                 allowDragging: isExploring
                   ? (e.phase === "await_first" || e.phase === "in_line")
-                  : (puzzlesOk && !!pzl && !currentSub),
+                  : (puzzlesOk && !!pzl && (!currentSub || retrying) && !autoMovePending),
                 darkSquareStyle:  { backgroundColor: boardTheme.dark },
                 lightSquareStyle: { backgroundColor: boardTheme.light },
                 boardStyle: { borderRadius: 0 },
@@ -509,14 +599,51 @@ export function HWPlayer({ hw, onBack }) {
             <>
               {/* Puzzle info / answer card */}
               <div className="bg-white border border-gray-200 rounded-[20px] shadow-sm p-5">
-                <div className="flex items-baseline gap-2 mb-4">
+                <div className="flex items-baseline gap-2 mb-3">
                   <span className="text-[15px] font-black text-gray-900">Puzzle {idx + 1}</span>
                   <span className="text-[12px] text-gray-400">of {total}</span>
+                  {autoMovePending && (
+                    <span className="ml-auto flex items-center gap-1 text-[11px] text-indigo-500">
+                      <Cpu size={11} className="animate-pulse" />thinking…
+                    </span>
+                  )}
                 </div>
 
+                {/* PGN comment bubble (puzzle hint) */}
+                {puzzleComments[pzl?.id] && !retrying && !currentSub && (
+                  <div className="mb-3 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200">
+                    <p className="text-[12px] text-amber-800 font-medium">{puzzleComments[pzl.id]}</p>
+                  </div>
+                )}
+
+                {/* Re-attempt feedback bubble */}
+                {bubble && (
+                  <div className={cn("mb-3 px-3 py-2.5 rounded-xl border flex items-start gap-2",
+                    bubble.type === 'correct'
+                      ? "bg-emerald-50 border-emerald-200"
+                      : "bg-red-50 border-red-200")}>
+                    {bubble.type === 'correct'
+                      ? <Check size={13} className="text-emerald-600 shrink-0 mt-0.5" strokeWidth={3} />
+                      : <X size={13} className="text-red-500 shrink-0 mt-0.5" strokeWidth={3} />}
+                    <p className={cn("text-[12px] font-medium whitespace-pre-line",
+                      bubble.type === 'correct' ? "text-emerald-700" : "text-red-700")}>
+                      {bubble.msg}
+                    </p>
+                  </div>
+                )}
+
                 {/* Moves display */}
-                <div className="min-h-[48px] mb-4">
-                  {currentSub ? (
+                <div className="min-h-[40px] mb-3">
+                  {retrying ? (
+                    movesUCI.length > 0 ? (
+                      <div>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Re-attempt moves</p>
+                        <p className="font-mono text-[12px] text-gray-700">{movesSAN.join(" ")}</p>
+                      </div>
+                    ) : (
+                      <p className="text-[12px] text-indigo-500 italic">Make your move…</p>
+                    )
+                  ) : currentSub ? (
                     <div>
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1.5">Your answer</p>
                       <p className="font-mono text-[13px] text-gray-700">
@@ -534,7 +661,24 @@ export function HWPlayer({ hw, onBack }) {
                 </div>
 
                 {/* Status / action */}
-                {currentSub ? (
+                {retrying ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <button onClick={reset} disabled={movesUCI.length === 0}
+                        className="flex-1 h-10 rounded-xl border-2 border-gray-200 text-[12px] font-bold text-gray-600 hover:border-gray-300 disabled:opacity-40 transition-colors">
+                        Reset
+                      </button>
+                      <button onClick={() => submitAnswer()} disabled={submitting || movesUCI.length === 0}
+                        className="flex-[2] h-10 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-bold disabled:opacity-40 transition-colors">
+                        {submitting ? "Submitting…" : "Submit"}
+                      </button>
+                    </div>
+                    <button onClick={() => setRetrying(false)}
+                      className="w-full h-8 text-[11px] text-gray-400 hover:text-gray-600 transition-colors">
+                      Cancel retry
+                    </button>
+                  </div>
+                ) : currentSub ? (
                   currentSub.reviewed ? (
                     currentSub.correct ? (
                       <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
@@ -542,9 +686,15 @@ export function HWPlayer({ hw, onBack }) {
                         <span className="text-[13px] font-bold text-emerald-700">Correct!</span>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
-                        <X size={16} className="text-red-500 shrink-0" strokeWidth={3} />
-                        <span className="text-[13px] font-bold text-red-600">Wrong</span>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
+                          <X size={16} className="text-red-500 shrink-0" strokeWidth={3} />
+                          <span className="text-[13px] font-bold text-red-600">Wrong answer</span>
+                        </div>
+                        <button onClick={startRetry}
+                          className="w-full h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-bold transition-colors flex items-center justify-center gap-1.5">
+                          Try Again
+                        </button>
                       </div>
                     )
                   ) : (
@@ -560,7 +710,7 @@ export function HWPlayer({ hw, onBack }) {
                         className="flex-1 h-10 rounded-xl border-2 border-gray-200 text-[12px] font-bold text-gray-600 hover:border-gray-300 disabled:opacity-40 transition-colors">
                         Reset
                       </button>
-                      <button onClick={submit} disabled={submitting || movesUCI.length === 0}
+                      <button onClick={() => submitAnswer()} disabled={submitting || movesUCI.length === 0}
                         className="flex-[2] h-10 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-bold disabled:opacity-40 transition-colors">
                         {submitting ? "Submitting…" : "Submit Answer"}
                       </button>
@@ -717,7 +867,7 @@ function timeAgo(date) {
   return `${days}d ago`;
 }
 
-function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
+function StudentHomeworkView({ homework, progressMap, allProgress, notifications = [], onOpen }) {
   const [tab,         setTab]         = useState('all');
   const [batchFilter, setBatchFilter] = useState('');
   const [sortBy,      setSortBy]      = useState('newest');
@@ -839,6 +989,20 @@ function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
             </div>
           </div>
 
+          {/* Notifications banner */}
+          {notifications.length > 0 && (
+            <div className="mb-4 p-4 rounded-2xl bg-indigo-50 border border-indigo-200">
+              <p className="text-[13px] font-bold text-indigo-800 mb-2">📬 {notifications.length} homework result{notifications.length > 1 ? 's' : ''} reviewed!</p>
+              <div className="space-y-1.5">
+                {notifications.map((n, i) => (
+                  <p key={i} className="text-[12px] text-indigo-700">
+                    <strong>{n.title}</strong> — {n.message}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
           <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3 px-1">Homework Assignments</p>
 
           <div className="space-y-3">
@@ -881,6 +1045,25 @@ function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
                               style={{ width: `${pct}%`, background: status === 'completed' ? '#22c55e' : '#f97316' }} />
                           </div>
                           <p className="text-[11px] text-gray-400 mt-1">{submitted}/{total} answered</p>
+                          {(p?.correct > 0 || p?.wrong > 0) && (
+                            <div className="flex items-center gap-3 mt-2">
+                              {p.correct > 0 && (
+                                <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                  <Check size={9} strokeWidth={3} />{p.correct} correct
+                                </span>
+                              )}
+                              {p.wrong > 0 && (
+                                <span className="flex items-center gap-1 text-[11px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">
+                                  <X size={9} strokeWidth={3} />{p.wrong} wrong
+                                </span>
+                              )}
+                              {p.correct + p.wrong > 0 && (
+                                <span className="text-[11px] text-gray-400">
+                                  {Math.round((p.correct / (p.correct + p.wrong)) * 100)}%
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1041,17 +1224,42 @@ function CoachReviewPanel({ hw, pgns, students, onClose }) {
       const updates = unreviewed.map(sub => {
         const pzl = puzzleMap[sub.puzzleId];
         if (!pzl || !sub.moves.length) return null;
-        const correctMove = pzl.solution[0]?.slice(0, 4);
-        const studentMove = sub.moves[0]?.slice(0, 4);
-        const isCorrect   = !!studentMove && !!correctMove && studentMove === correctMove;
-        return { studentId: sub.studentId, puzzleId: sub.puzzleId, correct: isCorrect };
+        // Compare all user moves (even indices) vs solution
+        let allCorrect = true;
+        const solution = pzl.solution || [];
+        for (let i = 0; i < sub.moves.length; i += 2) {
+          const expected = solution[i]?.slice(0, 4);
+          const actual   = sub.moves[i]?.slice(0, 4);
+          if (!actual || !expected || actual !== expected) { allCorrect = false; break; }
+        }
+        return { studentId: sub.studentId, puzzleId: sub.puzzleId, correct: allCorrect };
       }).filter(Boolean);
       if (!updates.length) return;
       await Promise.all(updates.map(u => saveSubmissionReview(hw.id, u.studentId, u.puzzleId, u.correct)));
-      setSubmissions(prev => prev.map(sub => {
+      const updatedSubs = submissions.map(sub => {
         const u = updates.find(x => x.studentId === sub.studentId && x.puzzleId === sub.puzzleId);
         return u ? { ...sub, reviewed: true, correct: u.correct } : sub;
+      });
+      setSubmissions(updatedSubs);
+
+      // Send notifications per student
+      const byStudentId = {};
+      updatedSubs.forEach(sub => {
+        if (!sub.reviewed) return;
+        const sid = String(sub.studentId);
+        if (!byStudentId[sid]) byStudentId[sid] = { studentId: sub.studentId, correct: 0, wrong: 0, total: 0 };
+        byStudentId[sid].total++;
+        if (sub.correct === true)  byStudentId[sid].correct++;
+        if (sub.correct === false) byStudentId[sid].wrong++;
+      });
+      const notifications = Object.values(byStudentId).map(s => ({
+        userId:  s.studentId,
+        type:    'homework_review',
+        title:   `${hw.title} reviewed`,
+        message: `Correct: ${s.correct} | Wrong: ${s.wrong} | ${Math.round((s.correct / Math.max(s.total, 1)) * 100)}%`,
+        data:    { hwId: hw.id, hwTitle: hw.title, correct: s.correct, wrong: s.wrong, total: s.total },
       }));
+      await createNotifications(notifications);
     } catch (err) {
       console.error("Auto-review failed:", err);
     } finally {
@@ -1222,6 +1430,8 @@ export default function HomeworkPage() {
   const [progressKey, setProgressKey] = useState(0);
   // coach review panel
   const [reviewHw,    setReviewHw]    = useState(null);
+  // student notifications
+  const [notifications, setNotifications] = useState([]);
 
   useEffect(() => {
     async function load() {
@@ -1259,11 +1469,15 @@ export default function HomeworkPage() {
     load();
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Refresh progress — runs on initial load and after returning from player
+  // Refresh progress + notifications — runs on initial load and after returning from player
   useEffect(() => {
     if (user?.role !== "student" || !user?.id || homework.length === 0) return;
-    getFullSubmissionsForStudent(user.id).then(rows => {
+    Promise.all([
+      getFullSubmissionsForStudent(user.id),
+      getNotificationsForUser(user.id),
+    ]).then(([rows, notifs]) => {
       setAllProgress(rows);
+      setNotifications(notifs.filter(n => !n.read));
       const map = {};
       homework.forEach(h => {
         const total     = pgns.find(pgn => pgn.id === h.pgnId)?.puzzleCount || 0;
@@ -1388,6 +1602,7 @@ export default function HomeworkPage() {
         homework={homework}
         progressMap={progressMap}
         allProgress={allProgress}
+        notifications={notifications}
         onOpen={setActiveHw}
       />
     );
