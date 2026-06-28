@@ -2460,9 +2460,9 @@ function StudentClassroomView({ search }) {
   ];
 
   return (
-    <div className="min-h-screen bg-[#f6f8fc]">
-      <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
-        <div className="flex items-center border-b-2 border-gray-200 mb-7 gap-0">
+    <div className="bg-[#f6f8fc]">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 pt-4 md:pt-5 pb-6">
+        <div className="flex items-center border-b-2 border-gray-200 mb-5 gap-0">
           {TABS.map(({ id, label }) => (
             <button key={id} onClick={() => setTab(id)}
               className={cn(
@@ -2638,8 +2638,8 @@ function CoachAdminBatchesView({ search }) {
   const selectedAcademy = allAcademies.find(a => String(a.id) === String(selectedId));
 
   return (
-    <div className="min-h-screen bg-[#f6f8fc]">
-      <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
+    <div className="bg-[#f6f8fc]">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 pt-4 md:pt-5 pb-6">
 
         {/* Academy selector — only shown when coach is in multiple academies */}
         {allAcademies.length > 1 && (
@@ -2669,7 +2669,7 @@ function CoachAdminBatchesView({ search }) {
           </div>
         )}
 
-        <div className="flex items-center border-b-2 border-gray-200 mb-7 gap-0">
+        <div className="flex items-center border-b-2 border-gray-200 mb-5 gap-0">
           {[["batches", "Batches"], ["calendar", "Calendar"]].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)}
               className={cn(

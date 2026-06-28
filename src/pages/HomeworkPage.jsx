@@ -370,7 +370,7 @@ export function HWPlayer({ hw, onBack }) {
   }, [pzl, currentSub]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="flex flex-col bg-white overflow-hidden" style={{ height: "calc(100vh - 70px)" }}>
+    <div className="flex flex-col bg-white overflow-y-auto md:overflow-hidden" style={{ height: "calc(100vh - 70px)" }}>
       {saveError && (
         <div className="flex items-center gap-3 px-5 py-2.5 bg-red-50 border-b border-red-200 text-red-700 text-[12px] font-medium shrink-0">
           <X size={13} strokeWidth={3} className="shrink-0" />
@@ -401,11 +401,11 @@ export function HWPlayer({ hw, onBack }) {
       </div>
 
       {/* Main content */}
-      <div className="flex flex-1 gap-4 p-4 overflow-hidden" style={{ minHeight: 0 }}>
+      <div className="flex flex-col md:flex-row flex-1 gap-3 md:gap-4 p-3 md:p-4 md:overflow-hidden" style={{ minHeight: 0 }}>
         {/* Board */}
-        <div className="flex-1 flex items-center justify-center min-w-0 overflow-hidden">
-          <div style={{ width: "min(70%, calc(100vh - 140px))", maxWidth: "min(70%, calc(100vh - 140px))" }}>
-            <div className="overflow-hidden rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
+        <div className="flex items-center justify-center md:flex-1 md:min-w-0 md:overflow-hidden">
+          <div className="aspect-square w-full" style={{ maxWidth: "min(100%, calc(100vh - 170px))" }}>
+            <div className="overflow-hidden rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] w-full h-full">
               <Chessboard options={{
                 position: isExploring ? (e.boardFen || e.startFen) : boardFen,
                 boardOrientation: orientation,
@@ -424,7 +424,7 @@ export function HWPlayer({ hw, onBack }) {
         </div>
 
         {/* Right panel */}
-        <div className="w-[300px] shrink-0 flex flex-col gap-4 overflow-y-auto">
+        <div className="md:w-[260px] w-full shrink-0 flex flex-col gap-3 md:gap-4 overflow-y-auto">
 
           {isExploring ? (
             <>
@@ -802,7 +802,7 @@ function StudentHomeworkView({ homework, progressMap, allProgress, onOpen }) {
   ];
 
   return (
-    <div className="min-h-screen bg-[#f6f8fc] p-5 md:p-7">
+    <div className="bg-[#f6f8fc] p-4 md:p-6">
 
       {/* ── Two-column layout ── */}
       <div className="flex gap-5 items-start">
@@ -1322,7 +1322,7 @@ export default function HomeworkPage() {
   // ── Assign form ─────────────────────────────────────────────────────────────
   if (view === "assign") {
     return (
-      <div className="min-h-screen bg-[#f6f8fc] p-5 md:p-8 lg:p-10">
+      <div className="bg-[#f6f8fc] p-4 md:p-6 lg:p-8">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center gap-4 mb-8">
             <button onClick={() => setView("list")}
@@ -1395,7 +1395,7 @@ export default function HomeworkPage() {
 
   // ── List view (coach / admin) ────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#f6f8fc]">
+    <div className="bg-[#f6f8fc]">
       <AnimatePresence>
         {reviewHw && (
           <CoachReviewPanel
@@ -1406,7 +1406,7 @@ export default function HomeworkPage() {
           />
         )}
       </AnimatePresence>
-      <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 pt-4 md:pt-5 pb-6">
 
         <div className="flex justify-end mb-6">
           <button onClick={() => setView("assign")}

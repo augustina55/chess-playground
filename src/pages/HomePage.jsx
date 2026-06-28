@@ -295,8 +295,8 @@ function CoachDashboard({ onNav }) {
   ];
 
   return (
-    <div className="min-h-screen bg-[#f5f6fa]">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8 py-8 space-y-6">
+    <div className="bg-[#f5f6fa]">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 pt-4 pb-6 space-y-5">
 
         {/* ── Dashboard header ── */}
         <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
@@ -573,8 +573,8 @@ function StudentDashboard({ onNav }) {
   );
 
   return (
-    <div className="min-h-screen bg-[#f4f6fb]">
-      <div className="max-w-5xl mx-auto px-5 md:px-8 py-8 space-y-6">
+    <div className="bg-[#f4f6fb]">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 pt-4 pb-6 space-y-5">
 
         {/* Welcome banner */}
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}

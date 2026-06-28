@@ -300,8 +300,8 @@ export default function AdminPage({ search }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#f6f8fc]">
-      <div className="max-w-7xl mx-auto px-5 md:px-8 lg:px-10 py-8 lg:py-10">
+    <div className="bg-[#f6f8fc]">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 pt-4 md:pt-5 pb-6">
 
         {/* Tabs */}
         <div className="flex gap-1 p-1.5 bg-white rounded-2xl border border-gray-200 shadow-sm w-fit mb-6">

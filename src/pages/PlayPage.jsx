@@ -656,7 +656,7 @@ export default function PlayPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f6fa]">
+    <div className="bg-[#f5f6fa]">
       {screen === 'lobby' && <Lobby onMode={handleMode} />}
       {screen === 'tc'    && <TCPicker title={mode === 'ai' ? 'Play vs AI' : 'Play Online'} onBack={() => setScreen('lobby')} onPick={handleTC} />}
       {screen === 'friend'&& <FriendSetup onBack={() => setScreen('lobby')} onStart={handleFriendStart} />}

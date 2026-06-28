@@ -325,8 +325,8 @@ export default function LearnPage({ chapters: propChapters }) {
   const overallPct       = totalLessons ? Math.round((completedLessons / totalLessons) * 100) : 0
 
   return (
-    <div className="min-h-screen bg-[#f5f6fa]">
-      <div className="max-w-4xl mx-auto px-5 md:px-8 py-8 space-y-6">
+    <div className="bg-[#f5f6fa]">
+      <div className="max-w-4xl mx-auto px-4 md:px-6 pt-4 pb-6 space-y-6">
 
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
